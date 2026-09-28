@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="color-scheme" content="light dark">
+<title>STT 성능 측정</title>
+<script src="coi.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#5f6b7a; --line:#dde2e8; --accent:#1f5fbf; --ok:#1e7d45; --warn:#b26a00; --bad:#b3261e; --code:#eef1f5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111417; --card:#1a1f25; --fg:#e6e9ee; --muted:#9aa5b1; --line:#2c343d; --accent:#6ea3ff; --ok:#5ccb84; --warn:#ffb74d; --bad:#ff7b72; --code:#232a32; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; padding:16px; padding-bottom:60px; }
+  h1 { font-size:20px; margin:4px 0 12px; }
+  h2 { font-size:17px; margin:0 0 10px; }
+  p { margin:6px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:14px; }
+  .kv b { font-weight:600; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  button { font:inherit; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  select, input[type=file] { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); max-width:100%; }
+  label.chk { display:flex; gap:8px; align-items:flex-start; padding:6px 0; font-size:15px; }
+  label.chk input { margin-top:5px; }
+  .ref { background:var(--code); border-radius:8px; padding:10px; font-size:15px; line-height:1.7; }
+  .bar { height:8px; background:var(--code); border-radius:4px; overflow:hidden; margin:4px 0; }
+  .bar > div { height:100%; background:var(--accent); width:0%; transition:width .2s; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 4px; text-align:left; vertical-align:top; }
+  th { font-weight:600; color:var(--muted); }
+  .out { white-space:pre-wrap; background:var(--code); border-radius:8px; padding:8px; font-size:14px; max-height:220px; overflow:auto; }
+  textarea { width:100%; min-height:160px; font:13px/1.4 ui-monospace, Menlo, monospace; border-radius:8px; border:1px solid var(--line); background:var(--code); color:var(--fg); padding:8px; }
+  .log { font:12px/1.4 ui-monospace, Menlo, monospace; color:var(--muted); max-height:140px; overflow:auto; background:var(--code); border-radius:8px; padding:8px; white-space:pre-wrap; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); }
+  .big { font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<h1>STT 성능 측정 <span class="pill">v0.1</span></h1>
+<p class="muted">이 페이지는 음성 인식 모델을 브라우저 안에서 직접 실행합니다. 녹음한 음성과 결과 텍스트는 기기 밖으로 나가지 않으며, 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 결과는 맨 아래 「리포트」에 모입니다.</p>
+
+<!-- 0. 환경 -->
+<div class="card">
+  <h2>1. 이 기기의 환경</h2>
+  <div class="kv" id="envBox"><span class="muted">확인 중…</span></div>
+  <div class="row"><button id="btnWake">화면 켜짐 유지(Wake Lock) 시험</button><span id="wakeOut" class="muted"></span></div>
+  <div class="row"><button id="btnCoi">멀티스레드 모드 켜기 (새로고침됨)</button><span id="coiOut" class="muted">CPU(WASM) 실행 속도를 크게 좌우합니다. 켠 뒤 위 「멀티스레드」가 '가능'으로 바뀌는지 확인하고, 문제가 생기면 다시 눌러 끄세요.</span></div>
+</div>
+
+<!-- 1. 샘플 -->
+<div class="card">
+  <h2>2. 시험용 음성 준비</h2>
+  <p class="muted">아래 문단을 평소 말하는 속도로 읽으며 녹음하세요(약 40초). 읽은 내용과 인식 결과를 자동으로 비교해 글자 오류율을 계산합니다. 파일(m4a·mp3·wav)로 시험할 수도 있습니다.</p>
+  <div class="ref" id="refText">지금부터 음성 인식 성능을 측정하겠습니다. 오늘 회의에서는 공정거래위원회 심사보고서에 대한 의견서 제출 기한과, 시장지배적 지위 남용 여부를 판단할 때 관련 시장을 어떻게 획정할 것인지 논의했습니다. 담당 변호사는 다음 주 화요일 오후 세 시까지 초안을 회람하고, 과징금 산정 기준과 감경 사유를 별도 표로 정리하기로 했습니다. 참고로 이 문장은 기기 안에서만 처리되며 외부 서버로 전송되지 않습니다. 마지막으로 계약 해지 통보는 내용증명 우편으로 보내고, 손해배상 청구 여부는 다음 회의에서 다시 검토하겠습니다.</div>
+  <div class="row">
+    <button class="primary" id="btnRec">● 읽으며 녹음 시작</button>
+    <button id="btnRecStop" disabled>■ 녹음 끝</button>
+    <span id="recStatus" class="muted"></span>
+  </div>
+  <div class="row">
+    <label class="muted">또는 파일: <input type="file" id="fileIn" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.aac,.caf"></label>
+    <label class="chk" style="padding:0"><input type="checkbox" id="fileIsRef"> 파일도 위 문단을 읽은 것(오류율 계산)</label>
+  </div>
+  <div id="sampleInfo" class="muted">아직 음성이 없습니다.</div>
+  <audio id="samplePlayer" controls style="width:100%; display:none; margin-top:6px"></audio>
+</div>
+
+<!-- 2. 모델 테스트 -->
+<div class="card">
+  <h2>3. 모델별 속도·정확도</h2>
+  <p class="muted">선택한 모델을 하나씩 내려받아 위 음성을 전사합니다. 처음 한 번은 내려받기 시간이 포함됩니다(모델당 40MB~560MB). 메모리 부족으로 페이지가 꺼지면 다시 열어 남은 모델만 선택하세요.</p>
+  <div id="modelList"></div>
+  <div class="row">
+    <label class="muted">실행 장치:
+      <select id="devSel"><option value="auto">자동</option><option value="webgpu">WebGPU(GPU)</option><option value="wasm">WASM(CPU)</option></select>
+    </label>
+    <label class="muted">CPU 스레드: <select id="thrSel"><option value="auto">자동</option><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="6">6</option></select></label>
+  </div>
+  <div class="row">
+    <button class="primary" id="btnRun" disabled>선택 모델 순차 실행</button>
+    <button id="btnStop" disabled>중단</button>
+    <span id="runStatus" class="muted"></span>
+  </div>
+  <div class="bar"><div id="dlBar"></div></div>
+  <div id="dlText" class="muted" style="font-size:13px"></div>
+  <table id="resTable" style="margin-top:8px"><thead><tr><th>모델</th><th>장치</th><th>로드</th><th>전사</th><th>배속</th><th>오류율</th></tr></thead><tbody></tbody></table>
+  <div id="resTexts"></div>
+</div>
+
+<!-- 3. 실시간 모의 -->
+<div class="card">
+  <h2>4. 실시간 전사 모의</h2>
+  <p class="muted">마이크로 계속 녹음하면서 일정 길이(창)마다 잘라 전사합니다. 말이 끝난 뒤 글자가 뜨기까지 걸린 시간(지연)과, 처리 속도가 녹음 속도를 따라가는지(적체)를 잽니다. 1~3분 정도 자유롭게 말해 보세요. 창 경계에서 단어가 잘리는 것은 정상입니다(본 앱에서는 겹침 처리로 보완).</p>
+  <div class="row">
+    <label class="muted">모델: <select id="rtModel"></select></label>
+    <label class="muted">창 길이: <select id="rtWin"><option value="5">5초</option><option value="8" selected>8초</option><option value="12">12초</option><option value="20">20초</option></select></label>
+  </div>
+  <div class="row">
+    <button class="primary" id="btnRt" disabled>실시간 모의 시작</button>
+    <button id="btnRtStop" disabled>끝</button>
+    <span id="rtStatus" class="muted"></span>
+  </div>
+  <div class="row" style="gap:20px">
+    <div><div class="muted" style="font-size:12px">경과</div><div class="big" id="rtElapsed">0:00</div></div>
+    <div><div class="muted" style="font-size:12px">최근 지연</div><div class="big" id="rtLat">–</div></div>
+    <div><div class="muted" style="font-size:12px">대기 창</div><div class="big" id="rtQueue">0</div></div>
+  </div>
+  <div class="out" id="rtOut"></div>
+  <div id="rtSummary" class="muted" style="margin-top:6px"></div>
+</div>
+
+<!-- 4. 리포트 -->
+<div class="card">
+  <h2>5. 리포트</h2>
+  <p class="muted">아래 내용을 복사해서 대화창에 붙여 주세요(음성 파일은 포함되지 않습니다).</p>
+  <div class="row"><button class="primary" id="btnCopy">리포트 복사</button><button id="btnJson">JSON 내려받기</button><span id="copyOut" class="muted"></span></div>
+  <textarea id="report" readonly></textarea>
+  <details style="margin-top:8px"><summary class="muted">진행 로그</summary><div class="log" id="log"></div></details>
+</div>
+
+<script>
+'use strict';
+// ---------- 유틸 ----------
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+function log(s) { const t = new Date().toTimeString().slice(0, 8); logEl.textContent += `[${t}] ${s}\n`; logEl.scrollTop = logEl.scrollHeight; }
+function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms'; }
+function fmtMB(b) { return (b / 1e6).toFixed(0) + 'MB'; }
+function normKo(s) { return (s || '').replace(/[\s.,!?·'"“”‘’()\-–—…:;\[\]]/g, ''); }
+function levenshtein(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = new Array(n + 1), cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) { cur[0] = i; const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= n; j++) { const cost = ca === b.charCodeAt(j - 1) ? 0 : 1; cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost); }
+    [prev, cur] = [cur, prev]; }
+  return prev[n];
+}
+function cer(ref, hyp) { const r = normKo(ref), h = normKo(hyp); if (!r.length) return null; return levenshtein(r, h) / r.length; }
+function resampleTo16k(float32, srcRate) {
+  if (srcRate === 16000) return float32;
+  const ratio = srcRate / 16000, outLen = Math.floor(float32.length / ratio), out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) { const pos = i * ratio, i0 = Math.floor(pos), i1 = Math.min(i0 + 1, float32.length - 1), f = pos - i0; out[i] = float32[i0] * (1 - f) + float32[i1] * f; }
+  return out;
+}
+// Whisper가 창 경계에서 같은 구절을 무한 반복하는 현상(환각)을 접고 횟수를 센다
+function collapseRepeats(s) { let n = 0; const out = s.replace(/(.{2,15}?)\1{2,}/g, (m, g) => { n++; return g; }); return { text: out, repeats: n }; }
+function concatF32(arrs) { let n = 0; for (const a of arrs) n += a.length; const out = new Float32Array(n); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; }
+function wavBlob(f32, rate) {
+  const buf = new ArrayBuffer(44 + f32.length * 2), v = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + f32.length * 2, true); ws(8, 'WAVE'); ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); ws(36, 'data'); v.setUint32(40, f32.length * 2, true);
+  for (let i = 0; i < f32.length; i++) { const s = Math.max(-1, Math.min(1, f32[i])); v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// ---------- 상태 ----------
+const REPORT = { version: 'stt-bench 0.1', when: new Date().toISOString(), env: {}, wakeLock: null, sample: null, models: [], realtime: null, errors: [] };
+let SAMPLE = null; // { audio: Float32Array(16k), sec, isRef }
+let gpuInfo = { available: false, f16: false, adapter: '' };
+
+// ---------- 모델 목록 ----------
+const MODELS = [
+  { id: 'onnx-community/whisper-tiny',  name: 'Whisper tiny',  note: '가장 작음 · 약 40MB · 한국어 정확도 낮음', wasm: 'q8', webgpu: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, def: true },
+  { id: 'onnx-community/whisper-base',  name: 'Whisper base',  note: '약 80MB · 실시간용 후보', wasm: 'q8', webgpu: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, def: true },
+  { id: 'onnx-community/whisper-small', name: 'Whisper small', note: '약 250MB · 한국어 쓸 만한 최소 크기 · 정밀 재전사 후보', wasm: 'q8', webgpu: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, def: true },
+  { id: 'onnx-community/whisper-large-v3-turbo', name: 'Whisper large-v3-turbo', note: '약 560MB · 정확도 최고 · WebGPU 전용, 노트북 권장(아이폰은 메모리 부족 가능)', wasm: null, webgpu: 'q4f16', def: false },
+];
+const modelListEl = $('modelList');
+MODELS.forEach((m, i) => {
+  const l = document.createElement('label'); l.className = 'chk';
+  l.innerHTML = `<input type="checkbox" data-i="${i}" ${m.def ? 'checked' : ''}> <span><b>${m.name}</b><br><span class="muted">${m.note}</span></span>`;
+  modelListEl.appendChild(l);
+  const o = document.createElement('option'); o.value = i; o.textContent = m.name; if (i === 1) o.selected = true; $('rtModel').appendChild(o);
+});
+
+// ---------- 환경 감지 ----------
+async function detectEnv() {
+  const e = {};
+  e.userAgent = navigator.userAgent;
+  e.platform = navigator.platform || '';
+  e.cores = navigator.hardwareConcurrency || null;
+  e.deviceMemoryGB = navigator.deviceMemory || null;
+  e.standalone = !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches);
+  e.webgpu = false; e.shaderF16 = false; e.gpuAdapter = '';
+  if (navigator.gpu) {
+    try { const ad = await navigator.gpu.requestAdapter(); if (ad) { e.webgpu = true; e.shaderF16 = ad.features.has('shader-f16');
+      try { const info = ad.info || (ad.requestAdapterInfo ? await ad.requestAdapterInfo() : null); if (info) e.gpuAdapter = [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' / '); } catch (_) {}
+      e.gpuMaxBuffer = ad.limits ? ad.limits.maxBufferSize : null; } } catch (err) { e.webgpuError = String(err); }
+  }
+  gpuInfo = { available: e.webgpu, f16: e.shaderF16, adapter: e.gpuAdapter };
+  e.wasmSIMD = await (async () => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); } catch (_) { return false; } })();
+  e.crossOriginIsolated = !!self.crossOriginIsolated;
+  e.sharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+  e.audioWorklet = !!(window.AudioContext && AudioContext.prototype && 'audioWorklet' in AudioContext.prototype);
+  e.mediaRecorder = typeof MediaRecorder !== 'undefined';
+  e.mediaRecorderMime = e.mediaRecorder ? ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/aac'].filter(t => MediaRecorder.isTypeSupported(t)).join(', ') : '';
+  e.wakeLock = 'wakeLock' in navigator;
+  e.fileSystemAccess = 'showSaveFilePicker' in window;
+  e.share = !!navigator.share;
+  try { const est = await navigator.storage.estimate(); e.storageQuotaGB = +(est.quota / 1e9).toFixed(2); e.storageUsedMB = +(est.usage / 1e6).toFixed(1); } catch (_) {}
+  try { e.storagePersisted = await navigator.storage.persisted(); } catch (_) {}
+  REPORT.env = e;
+  const rows = [
+    ['기기', e.userAgent.replace(/^Mozilla\/5\.0 \(/, '(').slice(0, 90)],
+    ['WebGPU', e.webgpu ? `<span class="ok">사용 가능</span> ${e.shaderF16 ? '(fp16 지원)' : '(fp16 미지원)'} ${e.gpuAdapter ? '· ' + e.gpuAdapter : ''}` : `<span class="warn">없음 → CPU(WASM)로 실행</span>`],
+    ['CPU 코어 / 메모리', `${e.cores || '?'}개 / ${e.deviceMemoryGB ? e.deviceMemoryGB + 'GB(대략)' : '미공개'}`],
+    ['WASM SIMD / 멀티스레드', `${e.wasmSIMD ? '지원' : '미지원'} / ${e.crossOriginIsolated ? '가능' : '불가(단일 스레드 — 호스팅 헤더 문제, 본 앱에서 해결 가능)'}`],
+    ['오디오', `AudioWorklet ${e.audioWorklet ? '○' : '×'} · MediaRecorder ${e.mediaRecorder ? '○ (' + (e.mediaRecorderMime || '형식 미확인') + ')' : '×'}`],
+    ['저장 공간', `${e.storageQuotaGB != null ? '할당 ' + e.storageQuotaGB + 'GB, 사용 ' + e.storageUsedMB + 'MB' : '미확인'} · 영구 보관 ${e.storagePersisted ? '허용' : '미허용(오래 안 쓰면 iOS가 모델 캐시를 지울 수 있음)'}`],
+    ['기타', `Wake Lock ${e.wakeLock ? '○' : '×'} · 홈 화면 설치 ${e.standalone ? '상태' : '아님'} · 공유 시트 ${e.share ? '○' : '×'}`],
+  ];
+  $('envBox').innerHTML = rows.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('');
+  const dev = $('devSel'); if (!e.webgpu) { dev.querySelector('[value=webgpu]').disabled = true; }
+  log('환경 감지 완료. WebGPU=' + e.webgpu);
+}
+detectEnv();
+
+(function coiUi() {
+  const on = localStorage.getItem('coi') === 'on';
+  $('btnCoi').textContent = on ? '멀티스레드 모드 끄기 (새로고침됨)' : '멀티스레드 모드 켜기 (새로고침됨)';
+  $('btnCoi').onclick = () => { localStorage.setItem('coi', on ? 'off' : 'on'); location.reload(); };
+  if (on && !self.crossOriginIsolated) $('coiOut').innerHTML = '<span class="warn">켜져 있지만 아직 격리되지 않았습니다 — 한 번 더 새로고침하거나, 이 브라우저는 서비스워커 헤더 주입을 지원하지 않는 것일 수 있습니다.</span>';
+})();
+$('btnWake').onclick = async () => {
+  try { const wl = await navigator.wakeLock.request('screen'); $('wakeOut').textContent = '성공 — 이 페이지가 떠 있는 동안 화면이 꺼지지 않습니다'; $('wakeOut').className = 'ok'; REPORT.wakeLock = 'ok';
+    wl.addEventListener('release', () => { $('wakeOut').textContent = '해제됨(앱 전환·화면 끔 시 정상)'; }); }
+  catch (err) { $('wakeOut').textContent = '실패: ' + err.message; $('wakeOut').className = 'bad'; REPORT.wakeLock = 'fail: ' + err.message; }
+};
+
+// ---------- 워커 ----------
+let worker = null, msgId = 0; const pending = new Map(); let progressCb = null;
+function getWorker() {
+  if (worker) return worker;
+  worker = new Worker('worker.js', { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'progress' || m.type === 'status') { if (progressCb) progressCb(m); return; }
+    const p = pending.get(m.id); if (!p) return;
+    if (m.type === 'error') { pending.delete(m.id); p.reject(new Error(m.message + (m.stack ? '\n' + m.stack : ''))); }
+    else { pending.delete(m.id); p.resolve(m); }
+  };
+  worker.onerror = (e) => { log('워커 오류: ' + e.message); REPORT.errors.push('worker: ' + e.message); };
+  return worker;
+}
+function call(msg, transfer) { const id = ++msgId; msg.id = id; return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); getWorker().postMessage(msg, transfer || []); }); }
+function resetWorker() { if (worker) { worker.terminate(); worker = null; } for (const p of pending.values()) p.reject(new Error('중단')); pending.clear(); }
+
+// ---------- 마이크 캡처 ----------
+let cap = null; // { ctx, stream, src, proc, rate }
+async function startCapture(onFrame) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+  const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC();
+  await ctx.resume();
+  const src = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = (e) => { const inp = e.inputBuffer.getChannelData(0); e.outputBuffer.getChannelData(0).fill(0); onFrame(new Float32Array(inp)); };
+  src.connect(proc); proc.connect(ctx.destination);
+  cap = { ctx, stream, src, proc, rate: ctx.sampleRate };
+  return cap;
+}
+async function stopCapture() { if (!cap) return; try { cap.proc.disconnect(); cap.src.disconnect(); cap.stream.getTracks().forEach(t => t.stop()); await cap.ctx.close(); } catch (_) {} cap = null; }
+
+function setSample(audio16k, isRef, label) {
+  SAMPLE = { audio: audio16k, sec: audio16k.length / 16000, isRef };
+  REPORT.sample = { seconds: +SAMPLE.sec.toFixed(1), isReference: isRef, source: label };
+  $('sampleInfo').innerHTML = `<span class="ok">음성 준비됨</span> — ${label}, ${SAMPLE.sec.toFixed(1)}초 ${isRef ? '(문단 낭독 → 오류율 계산함)' : '(자유 음성 → 오류율 계산 안 함)'}`;
+  const pl = $('samplePlayer'); pl.src = URL.createObjectURL(wavBlob(audio16k, 16000)); pl.style.display = 'block';
+  $('btnRun').disabled = false; $('btnRt').disabled = false;
+}
+
+let recFrames = [], recTimer = null;
+$('btnRec').onclick = async () => {
+  try {
+    recFrames = [];
+    const c = await startCapture((f) => recFrames.push(f));
+    const t0 = Date.now();
+    $('btnRec').disabled = true; $('btnRecStop').disabled = false;
+    recTimer = setInterval(() => { $('recStatus').textContent = `녹음 중 ${(Date.now() - t0) / 1000 | 0}초 (마이크 ${c.rate}Hz)`; }, 250);
+    log('녹음 시작, sampleRate=' + c.rate);
+  } catch (err) { $('recStatus').textContent = '마이크 실패: ' + err.message; REPORT.errors.push('mic: ' + err.message); log('마이크 실패 ' + err.message); }
+};
+$('btnRecStop').onclick = async () => {
+  clearInterval(recTimer); const rate = cap ? cap.rate : 48000; await stopCapture();
+  $('btnRec').disabled = false; $('btnRecStop').disabled = true; $('recStatus').textContent = '';
+  const raw = concatF32(recFrames); recFrames = [];
+  const a16 = resampleTo16k(raw, rate);
+  const peak = a16.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  if (peak < 0.01) { $('sampleInfo').innerHTML = '<span class="bad">소리가 거의 잡히지 않았습니다. 마이크 권한과 음소거를 확인하고 다시 녹음하세요.</span>'; return; }
+  setSample(a16, true, '마이크 녹음');
+};
+$('fileIn').onchange = async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC();
+    const buf = await ctx.decodeAudioData(await f.arrayBuffer());
+    const off = new OfflineAudioContext(1, Math.ceil(buf.duration * 16000), 16000);
+    const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+    const rendered = await off.startRendering(); await ctx.close();
+    setSample(rendered.getChannelData(0).slice(), $('fileIsRef').checked, '파일 ' + f.name);
+  } catch (err) { $('sampleInfo').innerHTML = '<span class="bad">파일을 읽지 못했습니다: ' + err.message + '</span>'; }
+};
+
+// ---------- 모델 테스트 ----------
+let stopFlag = false;
+function pickDevice() { const v = $('devSel').value; if (v === 'auto') return gpuInfo.available ? 'webgpu' : 'wasm'; return v; }
+function dtypeFor(m, device) { return device === 'webgpu' ? m.webgpu : m.wasm; }
+function addResultRow(r) {
+  const tb = $('resTable').querySelector('tbody'); const tr = document.createElement('tr');
+  const rtf = r.rtf != null ? r.rtf.toFixed(2) + '× ' + (r.rtf < 0.5 ? '<span class="ok">여유</span>' : r.rtf < 1 ? '<span class="warn">빠듯</span>' : '<span class="bad">못 따라감</span>') : '–';
+  tr.innerHTML = `<td>${r.name}</td><td>${r.device}</td><td>${r.loadMs != null ? fmtMs(r.loadMs) + (r.bytes ? '<br><span class="muted">' + fmtMB(r.bytes) + '</span>' : '') : '–'}</td><td>${r.inferMs != null ? fmtMs(r.inferMs) : '–'}</td><td>${rtf}</td><td>${r.cer != null ? (r.cer * 100).toFixed(1) + '%' : (r.error ? '<span class="bad">오류</span>' : '–')}</td>`;
+  tb.appendChild(tr);
+  const d = document.createElement('details'); d.style.marginTop = '6px';
+  d.innerHTML = `<summary>${r.name} 결과 텍스트${r.error ? ' (오류)' : ''}</summary><div class="out">${r.error ? r.error : (r.text || '(빈 결과)')}</div>`;
+  $('resTexts').appendChild(d);
+}
+$('btnRun').onclick = async () => {
+  if (!SAMPLE) return;
+  const sel = [...modelListEl.querySelectorAll('input:checked')].map(i => MODELS[+i.dataset.i]);
+  if (!sel.length) { $('runStatus').textContent = '모델을 선택하세요'; return; }
+  stopFlag = false; $('btnRun').disabled = true; $('btnStop').disabled = false;
+  const device = pickDevice();
+  const thr = $('thrSel').value;
+  for (const m of sel) {
+    if (stopFlag) break;
+    const dtype = dtypeFor(m, device);
+    if (!dtype) { addResultRow({ name: m.name, device, error: 'WASM(CPU)에서는 이 모델을 지원하지 않습니다' }); continue; }
+    const r = { name: m.name, model: m.id, device, dtype, threads: thr };
+    $('runStatus').textContent = `${m.name} 내려받기·초기화 중…`;
+    progressCb = (p) => { if (p.type === 'progress') { $('dlBar').style.width = (p.progress || 0) + '%'; $('dlText').textContent = `${p.file}: ${fmtMB(p.loaded || 0)} / ${p.total ? fmtMB(p.total) : '?'}`; } else if (p.status === 'ready') { $('dlText').textContent = '초기화 중…'; } };
+    try {
+      const L = await call({ type: 'load', modelId: m.id, device, dtype, threads: thr });
+      r.loadMs = L.loadMs; r.bytes = L.bytes; r.wasmThreads = L.threads; r.isolated = L.isolated;
+      $('runStatus').textContent = `${m.name} 전사 중… (${SAMPLE.sec.toFixed(0)}초 음성)`;
+      const audio = SAMPLE.audio.slice();
+      const T = await call({ type: 'transcribe', audio, sampleRate: 16000, options: {} }, [audio.buffer]);
+      r.inferMs = T.inferMs; r.audioSec = +T.durationSec.toFixed(1); r.rtf = T.inferMs / 1000 / T.durationSec; r.text = T.text.trim();
+      r.cer = SAMPLE.isRef ? +cer($('refText').textContent, r.text).toFixed(4) : null;
+      log(`${m.name}: load ${r.loadMs}ms, infer ${r.inferMs}ms, rtf ${r.rtf.toFixed(2)}, cer ${r.cer}`);
+    } catch (err) {
+      r.error = err.message; REPORT.errors.push(`${m.name}/${device}: ${err.message.split('\n')[0]}`); log(`${m.name} 오류: ${err.message}`);
+      resetWorker();
+    }
+    REPORT.models.push(r); addResultRow(r); renderReport();
+    $('dlBar').style.width = '0%'; $('dlText').textContent = '';
+  }
+  progressCb = null; $('runStatus').textContent = stopFlag ? '중단됨' : '완료'; $('btnRun').disabled = false; $('btnStop').disabled = true;
+};
+$('btnStop').onclick = () => { stopFlag = true; resetWorker(); $('runStatus').textContent = '중단 중…'; };
+
+// ---------- 실시간 모의 ----------
+let rt = null;
+$('btnRt').onclick = async () => {
+  const m = MODELS[+$('rtModel').value]; const device = pickDevice(); const dtype = dtypeFor(m, device);
+  if (!dtype) { $('rtStatus').textContent = '이 장치에서는 그 모델을 못 씁니다'; return; }
+  const winSec = +$('rtWin').value;
+  $('btnRt').disabled = true; $('rtStatus').textContent = `${m.name} 로드 중…`;
+  progressCb = (p) => { if (p.type === 'progress') $('rtStatus').textContent = `${m.name} 내려받는 중 ${fmtMB(p.loaded || 0)}`; };
+  try { await call({ type: 'load', modelId: m.id, device, dtype, threads: $('thrSel').value }); } catch (err) { $('rtStatus').textContent = '로드 실패: ' + err.message; $('btnRt').disabled = false; return; }
+  progressCb = null;
+  let wl = null; try { if (navigator.wakeLock) wl = await navigator.wakeLock.request('screen'); } catch (_) {}
+  rt = { model: m.name, device, winSec, frames: [], samples: 0, queue: [], busy: false, lats: [], infers: [], maxQueue: 0, t0: performance.now(), text: '', wl, windows: 0, repeats: 0 };
+  $('rtOut').textContent = ''; $('rtSummary').textContent = '';
+  const c = await startCapture((f) => {
+    if (!rt) return; rt.frames.push(f); rt.samples += f.length;
+    if (rt.samples >= c.rate * winSec) {
+      const raw = concatF32(rt.frames); rt.frames = []; rt.samples = 0;
+      rt.queue.push({ audio: resampleTo16k(raw, c.rate), endedAt: performance.now() });
+      rt.maxQueue = Math.max(rt.maxQueue, rt.queue.length); $('rtQueue').textContent = rt.queue.length; pump();
+    }
+  });
+  $('btnRtStop').disabled = false; $('rtStatus').textContent = `녹음 중 — ${m.name} / ${device} / ${winSec}초 창`;
+  rt.timer = setInterval(() => { const s = (performance.now() - rt.t0) / 1000 | 0; $('rtElapsed').textContent = `${s / 60 | 0}:${String(s % 60).padStart(2, '0')}`; }, 500);
+  async function pump() {
+    if (!rt || rt.busy || !rt.queue.length) return; rt.busy = true;
+    const job = rt.queue.shift(); $('rtQueue').textContent = rt.queue.length;
+    try {
+      const T = await call({ type: 'transcribe', audio: job.audio, sampleRate: 16000, options: { return_timestamps: false, max_new_tokens: Math.round(winSec * 10) + 16 } }, [job.audio.buffer]);
+      if (!rt) return;
+      const lat = performance.now() - job.endedAt; rt.lats.push(lat); rt.infers.push(T.inferMs); rt.windows++;
+      const c = collapseRepeats(T.text.trim()); rt.repeats += c.repeats;
+      rt.text += c.text + (c.repeats ? ' ⟲ ' : ' '); $('rtOut').textContent = rt.text; $('rtOut').scrollTop = 1e9;
+      $('rtLat').textContent = fmtMs(lat); $('rtLat').className = 'big ' + (lat < winSec * 1000 ? 'ok' : 'bad');
+    } catch (err) { $('rtStatus').textContent = '전사 오류: ' + err.message; REPORT.errors.push('rt: ' + err.message.split('\n')[0]); }
+    rt.busy = false; pump();
+  }
+};
+$('btnRtStop').onclick = async () => {
+  if (!rt) return; const r = rt; clearInterval(r.timer); await stopCapture();
+  const waitStart = performance.now();
+  $('rtStatus').textContent = '남은 창 처리 중…';
+  while ((r.queue.length || r.busy) && performance.now() - waitStart < 120000) await new Promise(res => setTimeout(res, 300));
+  rt = null; if (r.wl) try { r.wl.release(); } catch (_) {}
+  const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const sum = { model: r.model, device: r.device, windowSec: r.winSec, elapsedSec: +((performance.now() - r.t0) / 1000).toFixed(0), windows: r.windows,
+    avgLatencyMs: avg(r.lats) && Math.round(avg(r.lats)), maxLatencyMs: r.lats.length ? Math.round(Math.max(...r.lats)) : null,
+    avgInferMs: avg(r.infers) && Math.round(avg(r.infers)), rtf: avg(r.infers) ? +(avg(r.infers) / 1000 / r.winSec).toFixed(2) : null, maxQueue: r.maxQueue, textChars: r.text.length, repeatHallucinations: r.repeats, isolated: !!self.crossOriginIsolated };
+  REPORT.realtime = sum; renderReport();
+  const verdict = sum.rtf == null ? '측정 없음' : sum.rtf < 0.6 ? '실시간 가능(여유)' : sum.rtf < 1 ? '실시간 가능하나 빠듯' : '실시간 불가(적체 누적) → 준실시간 또는 더 작은 모델';
+  $('rtSummary').innerHTML = `평균 지연 <b>${sum.avgLatencyMs != null ? fmtMs(sum.avgLatencyMs) : '–'}</b> · 최대 지연 ${sum.maxLatencyMs != null ? fmtMs(sum.maxLatencyMs) : '–'} · 처리 배속 ${sum.rtf ?? '–'}× · 최대 대기 ${sum.maxQueue}창 · 반복 환각 ${sum.repeatHallucinations}회 → <b>${verdict}</b>`;
+  $('rtStatus').textContent = '완료'; $('btnRt').disabled = false; $('btnRtStop').disabled = true;
+};
+
+// ---------- 리포트 ----------
+function renderReport() {
+  const e = REPORT.env; const lines = [];
+  lines.push(`# STT 성능 리포트 (${new Date().toLocaleString('ko-KR')})`);
+  lines.push(`기기: ${e.userAgent || ''}`);
+  lines.push(`WebGPU: ${e.webgpu ? '가능' + (e.shaderF16 ? ', fp16' : '') + (e.gpuAdapter ? ', ' + e.gpuAdapter : '') : '없음'} | 코어 ${e.cores} | 메모리 ${e.deviceMemoryGB || '?'}GB | 멀티스레드 ${e.crossOriginIsolated ? '가능' : '불가'} | 저장 ${e.storageQuotaGB ?? '?'}GB(영구 ${e.storagePersisted ? '○' : '×'})`);
+  lines.push(`Wake Lock: ${REPORT.wakeLock || '미시험'} | 샘플: ${REPORT.sample ? REPORT.sample.seconds + 's, ' + REPORT.sample.source + (REPORT.sample.isReference ? ', 낭독' : ', 자유') : '없음'}`);
+  lines.push(''); lines.push('## 모델별');
+  for (const r of REPORT.models) lines.push(r.error ? `- ${r.name} [${r.device}]: 오류 — ${r.error.split('\n')[0]}` : `- ${r.name} [${r.device}/${typeof r.dtype === 'string' ? r.dtype : 'fp32+q4'}]: 로드 ${fmtMs(r.loadMs)}(${fmtMB(r.bytes || 0)}${r.device === 'wasm' && r.wasmThreads ? ', ' + r.wasmThreads + '스레드' : ''}), 전사 ${fmtMs(r.inferMs)} / ${r.audioSec}s = ${r.rtf.toFixed(2)}×, 오류율 ${r.cer != null ? (r.cer * 100).toFixed(1) + '%' : '–'}`);
+  for (const r of REPORT.models) if (r.text) lines.push(`  · ${r.name} 텍스트: ${r.text.slice(0, 400)}${r.text.length > 400 ? '…' : ''}`);
+  if (REPORT.realtime) { const s = REPORT.realtime; lines.push(''); lines.push('## 실시간 모의'); lines.push(`- ${s.model} [${s.device}] 창 ${s.windowSec}s, ${s.elapsedSec}s 동안 ${s.windows}창: 평균 지연 ${s.avgLatencyMs}ms, 최대 ${s.maxLatencyMs}ms, 평균 처리 ${s.avgInferMs}ms(${s.rtf}×), 최대 대기 ${s.maxQueue}창, 반복 환각 ${s.repeatHallucinations}회, 멀티스레드 ${s.isolated ? '○' : '×'}`); }
+  if (REPORT.errors.length) { lines.push(''); lines.push('## 오류'); REPORT.errors.forEach(x => lines.push('- ' + x)); }
+  lines.push(''); lines.push('```json'); lines.push(JSON.stringify(REPORT)); lines.push('```');
+  $('report').value = lines.join('\n');
+}
+$('btnCopy').onclick = async () => { renderReport(); try { await navigator.clipboard.writeText($('report').value); $('copyOut').textContent = '복사됨'; } catch (_) { $('report').select(); document.execCommand('copy'); $('copyOut').textContent = '복사됨(선택 복사)'; } };
+$('btnJson').onclick = () => { renderReport(); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(REPORT, null, 2)], { type: 'application/json' })); a.download = 'stt-bench-report.json'; a.click(); };
+setTimeout(renderReport, 1500);
+window.addEventListener('error', (e) => { REPORT.errors.push('page: ' + e.message); log('페이지 오류: ' + e.message); });
+window.addEventListener('unhandledrejection', (e) => { REPORT.errors.push('promise: ' + (e.reason && e.reason.message || e.reason)); });
+</script>
+</body>
+</html>
