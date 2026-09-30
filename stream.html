@@ -32,7 +32,7 @@
 </style>
 </head>
 <body>
-<h1>실시간 전사 측정 <span class="muted" style="font-size:13px">스트리밍 v0.2.1 · <a href="index.html">Whisper 측정 페이지</a></span></h1>
+<h1>실시간 전사 측정 <span class="muted" style="font-size:13px">스트리밍 v0.2.2 · <a href="index.html">Whisper 측정 페이지</a></span></h1>
 <p class="muted">말하는 도중에 글자가 흘러나오는 스트리밍 방식(sherpa-onnx, 한국어 Zipformer)을 이 기기에서 시험합니다. 음성은 기기 밖으로 나가지 않으며, 처음 한 번 모델(약 130MB)을 내려받아 브라우저에 저장합니다.</p>
 
 <div class="card">
@@ -58,6 +58,7 @@
     <button class="primary" id="btnStart" disabled>● 시작</button>
     <button id="btnStop" disabled>■ 끝</button>
     <label class="chk"><input type="checkbox" id="isRef" checked> 위 문단을 읽음(오류율 계산)</label>
+    <label class="muted">마이크: <select id="micSel"><option value="default">브라우저 기본 처리(권장)</option><option value="agc">AGC만</option><option value="raw">처리 끔(원음)</option></select></label>
     <span id="rtStatus" class="muted"></span>
   </div>
   <div class="row" style="gap:20px">
@@ -92,7 +93,7 @@ function levenshtein(a, b) { const m = a.length, n = b.length; if (!m) return n;
 function cer(ref, hyp) { const r = normKo(ref), h = normKo(hyp); if (!r.length) return null; return levenshtein(r, h) / r.length; }
 function resampleTo16k(f32, srcRate) { if (srcRate === 16000) return f32; const ratio = srcRate / 16000, outLen = Math.floor(f32.length / ratio), out = new Float32Array(outLen); for (let i = 0; i < outLen; i++) { const pos = i * ratio, i0 = Math.floor(pos), i1 = Math.min(i0 + 1, f32.length - 1), f = pos - i0; out[i] = f32[i0] * (1 - f) + f32[i1] * f; } return out; }
 
-const REPORT = { version: 'stt-bench stream 0.2.1', when: new Date().toISOString(), env: {}, model: null, runs: [], errors: [] };
+const REPORT = { version: 'stt-bench stream 0.2.2', when: new Date().toISOString(), env: {}, model: null, runs: [], errors: [] };
 window.addEventListener('error', (e) => { REPORT.errors.push('page: ' + e.message); log('페이지 오류: ' + e.message); });
 
 // ---------- 환경 ----------
@@ -225,23 +226,25 @@ function feed(r, f32at16k) {
   const rms = Math.sqrt(sq / Math.max(1, f32at16k.length)); r.peak = Math.max(r.peak, pk); r.rmsSum += rms; r.rmsN++; r.lastRms = rms; r.segEnergy = Math.max(r.segEnergy, rms);
   if (r.source === '마이크') r.keep.push(f32at16k.slice());
   // 입력 레벨 정규화: 스트리밍 모델은 작은 입력(피크 0.03 수준)에서 아무것도 내지 않으므로 느린 포락선 기준으로 피크를 0.5 근처로 끌어올린다
-  r.env = Math.max(pk, (r.env || 0) * 0.97); const g = r.env > 0.003 ? Math.min(30, 0.5 / r.env) : 1; r.gainSum = (r.gainSum || 0) + g; r.gainMax = Math.max(r.gainMax || 1, g);
+  r.env = Math.max(pk, (r.env || 0) * 0.985); const g = r.env > 0.0015 ? Math.min(100, 0.5 / r.env) : 1; r.gainSum = (r.gainSum || 0) + g; r.gainMax = Math.max(r.gainMax || 1, g);
+  r.segPk = Math.max(r.segPk || 0, pk); r.segRmsSum = (r.segRmsSum || 0) + rms; r.segN = (r.segN || 0) + 1; r.segG = Math.max(r.segG || 1, g);
   if (g > 1.05) { const out = new Float32Array(f32at16k.length); for (let i = 0; i < out.length; i++) { const v = f32at16k[i] * g; out[i] = v > 1 ? 1 : v < -1 ? -1 : v; } f32at16k = out; }
   r.stream.acceptWaveform(16000, f32at16k); r.audioSec += f32at16k.length / 16000; if (recognizer2) r.segBuf.push(f32at16k.slice());
   const d0 = performance.now();
   while (recognizer.isReady(r.stream)) recognizer.decode(r.stream);
   const text = (recognizer.getResult(r.stream).text || '').trim();
   const isEp = recognizer.isEndpoint(r.stream);
-  if (isEp) { let seg = null; if (text) { seg = { t: +(r.audioSec).toFixed(1), text }; r.segments.push(seg); }
-    else if (recognizer2 && r.segEnergy > 0.01) { seg = { t: +(r.audioSec).toFixed(1), text: '', p1Empty: true }; r.segments.push(seg); r.p1Empty++; } // 소리는 있는데 1차가 비었으면 2차로 확인
-    r.partial = ''; r.segEnergy = 0; recognizer.reset(r.stream); secondPass(r, seg); }
+  if (isEp) { let seg = null; const stats = { pk: +(r.segPk || 0).toFixed(3), rms: +((r.segRmsSum || 0) / Math.max(1, r.segN || 1)).toFixed(4), g: +(r.segG || 1).toFixed(0) };
+    if (text) { seg = { t: +(r.audioSec).toFixed(1), text, ...stats }; r.segments.push(seg); }
+    else if (recognizer2 && r.segEnergy > 0.003) { seg = { t: +(r.audioSec).toFixed(1), text: '', p1Empty: true, ...stats }; r.segments.push(seg); r.p1Empty++; } // 소리는 있는데 1차가 비었으면 2차로 확인
+    r.partial = ''; r.segEnergy = 0; r.segPk = 0; r.segRmsSum = 0; r.segN = 0; r.segG = 1; recognizer.reset(r.stream); secondPass(r, seg); }
   else r.partial = text;
   const step = performance.now() - d0; r.decodeMs += step; r.steps++; r.maxStepMs = Math.max(r.maxStepMs, step);
   r.lastLagMs = performance.now() - tArrive; r.maxLagMs = Math.max(r.maxLagMs, r.lastLagMs);
   return isEp;
 }
 function render(r) {
-  $('live').innerHTML = r.segments.map(s => `<div class="final"><span class="ts">[${fmtT(s.t)}]</span>${s.text2 != null ? esc(s.text2) + ` <span class="ts">(2차 ${s.p2Ms}ms · 1차: ${s.text ? esc(s.text) : '없음'})</span>` : (s.text || '<span class="ts">(1차 없음 · 2차 대기)</span>')}</div>`).join('') + (r.partial ? `<div class="partial">${esc(r.partial)}…</div>` : '');
+  $('live').innerHTML = r.segments.map(s => `<div class="final"><span class="ts">[${fmtT(s.t)}]</span>${s.text2 != null ? esc(s.text2) + ` <span class="ts">(2차 ${s.p2Ms}ms · 1차: ${s.text ? esc(s.text) : '없음'})</span>` : (s.text || '<span class="ts">(1차 없음 · 2차 대기)</span>')}${s.pk != null ? ` <span class="ts">pk ${s.pk} g${s.g}</span>` : ''}</div>`).join('') + (r.partial ? `<div class="partial">${esc(r.partial)}…</div>` : '');
   $('live').scrollTop = 1e9;
   $('rtf').textContent = r.audioSec > 1 ? (r.decodeMs / 1000 / r.audioSec).toFixed(2) + '×' : '–';
   const lv = Math.min(100, Math.round((r.lastRms || 0) * 100 / 0.15)); $('lvl').style.width = lv + '%'; $('lvlTxt').textContent = `피크 ${r.peak.toFixed(3)}` + (r.audioSec > 3 && r.peak < 0.01 ? ' — 소리 없음!' : '');
@@ -252,7 +255,8 @@ function fmtT(sec) { const s = Math.floor(sec); return `${Math.floor(s / 60)}:${
 function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 async function finish(r) {
   r.stream.inputFinished(); while (recognizer.isReady(r.stream)) recognizer.decode(r.stream);
-  const tail = (recognizer.getResult(r.stream).text || '').trim(); let tailSeg = null; if (tail) { tailSeg = { t: +r.audioSec.toFixed(1), text: tail }; r.segments.push(tailSeg); } r.partial = '';
+  const tail = (recognizer.getResult(r.stream).text || '').trim(); let tailSeg = null; const tstats = { pk: +(r.segPk || 0).toFixed(3), rms: +((r.segRmsSum || 0) / Math.max(1, r.segN || 1)).toFixed(4), g: +(r.segG || 1).toFixed(0) };
+  if (tail || (recognizer2 && r.segEnergy > 0.003)) { tailSeg = { t: +r.audioSec.toFixed(1), text: tail, p1Empty: !tail, ...tstats }; r.segments.push(tailSeg); } r.partial = '';
   const lastJob = secondPass(r, tailSeg, true);
   const waits = [...p2Pending.values()].filter(j => j.r === r).map(j => j.done); if (lastJob) waits.push(lastJob);
   if (waits.length) { $('rtStatus').textContent = '2차 처리 마무리 중…'; await Promise.race([Promise.all(waits), new Promise(res => setTimeout(res, 60000))]); }
@@ -262,7 +266,7 @@ async function finish(r) {
   const isRef = $('isRef').checked; const c = isRef ? cer($('refText').textContent, full) : null; const c2 = (isRef && full2 != null) ? cer($('refText').textContent, full2) : null;
   const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const p2rtf = r.p2Ms.length ? +(r.p2Ms.reduce((x, y) => x + y, 0) / 1000 / r.p2AudioSec.reduce((x, y) => x + y, 0)).toFixed(3) : null;
-  const sum = { source: r.source, audioSec: +r.audioSec.toFixed(1), wallSec: +((performance.now() - r.t0) / 1000).toFixed(1), rtf: +(r.decodeMs / 1000 / Math.max(r.audioSec, 0.1)).toFixed(3), avgStepMs: +(r.decodeMs / Math.max(r.steps, 1)).toFixed(1), maxStepMs: Math.round(r.maxStepMs), maxLagMs: Math.round(r.maxLagMs), segments: r.segments.length, chars: full.length, cer: c != null ? +c.toFixed(4) : null, text: full.slice(0, 600), peak: +r.peak.toFixed(4), avgRms: +(r.rmsSum / Math.max(1, r.rmsN)).toFixed(4), gainAvg: +((r.gainSum || 0) / Math.max(1, r.steps)).toFixed(1), gainMax: +(r.gainMax || 1).toFixed(1), p1EmptySegs: r.p1Empty, mic: r.mic || null,
+  const sum = { source: r.source, audioSec: +r.audioSec.toFixed(1), wallSec: +((performance.now() - r.t0) / 1000).toFixed(1), rtf: +(r.decodeMs / 1000 / Math.max(r.audioSec, 0.1)).toFixed(3), avgStepMs: +(r.decodeMs / Math.max(r.steps, 1)).toFixed(1), maxStepMs: Math.round(r.maxStepMs), maxLagMs: Math.round(r.maxLagMs), segments: r.segments.length, chars: full.length, cer: c != null ? +c.toFixed(4) : null, text: full.slice(0, 600), peak: +r.peak.toFixed(4), avgRms: +(r.rmsSum / Math.max(1, r.rmsN)).toFixed(4), gainAvg: +((r.gainSum || 0) / Math.max(1, r.steps)).toFixed(1), gainMax: +(r.gainMax || 1).toFixed(1), p1EmptySegs: r.p1Empty, mic: r.mic || null, segStats: r.segments.map(s => `[${fmtT(s.t)} pk${s.pk ?? '?'} g${s.g ?? '?'} | ${(s.text || '∅').slice(0, 40)} → ${(s.text2 != null ? (s.text2 || '∅') : '-').slice(0, 40)}]`).join(' '),
     pass2: recognizer2 ? { avgMs: Math.round(avg(r.p2Ms) || 0), maxMs: Math.round(Math.max(0, ...r.p2Ms)), rtf: p2rtf, cer: c2 != null ? +c2.toFixed(4) : null, text: (full2 || '').slice(0, 600) } : null };
   REPORT.runs.push(sum); renderReport();
   const verdict = sum.rtf < 0.5 ? '실시간 여유' : sum.rtf < 1 ? '실시간 가능(빠듯)' : '실시간 불가';
@@ -276,12 +280,14 @@ $('btnStart').onclick = async () => {
   try {
     // iOS: AudioContext는 사용자 제스처 안에서(await 전에) 만들고 resume해야 소리가 들어온다
     const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const p0 = ctx.resume();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    const micMode = $('micSel').value;
+    const audioC = micMode === 'default' ? { channelCount: 1 } : micMode === 'agc' ? { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } : { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioC });
     await p0; if (ctx.state !== 'running') { try { await ctx.resume(); } catch (_) {} }
     const track = stream.getAudioTracks()[0]; const ts = track && track.getSettings ? track.getSettings() : {};
     const src = ctx.createMediaStreamSource(stream); const proc = ctx.createScriptProcessor(4096, 1, 1);
     curRun = newRun('마이크'); const r = curRun; let pending = [];
-    r.mic = { ctxState: ctx.state, ctxRate: ctx.sampleRate, label: track ? track.label : '', settings: { sampleRate: ts.sampleRate, channelCount: ts.channelCount, echoCancellation: ts.echoCancellation, noiseSuppression: ts.noiseSuppression, autoGainControl: ts.autoGainControl, deviceId: ts.deviceId ? String(ts.deviceId).slice(0, 8) : undefined } };
+    r.mic = { mode: micMode, ctxState: ctx.state, ctxRate: ctx.sampleRate, label: track ? track.label : '', settings: { sampleRate: ts.sampleRate, channelCount: ts.channelCount, echoCancellation: ts.echoCancellation, noiseSuppression: ts.noiseSuppression, autoGainControl: ts.autoGainControl, deviceId: ts.deviceId ? String(ts.deviceId).slice(0, 8) : undefined } };
     log(`마이크: ctx ${ctx.state} ${ctx.sampleRate}Hz, track "${r.mic.label}" ${JSON.stringify(r.mic.settings)}`);
     try { if (navigator.wakeLock) r.wl = await navigator.wakeLock.request('screen'); } catch (_) {}
     proc.onaudioprocess = (e) => { const inp = e.inputBuffer.getChannelData(0); e.outputBuffer.getChannelData(0).fill(0); if (curRun !== r) return; pending.push(resampleTo16k(new Float32Array(inp), ctx.sampleRate)); };
@@ -333,7 +339,7 @@ function renderReport() {
   L.push(`# 스트리밍 전사 리포트 (${new Date().toLocaleString('ko-KR')})`);
   L.push(`기기: ${e.userAgent || ''} | 코어 ${e.cores} | 메모리 ${e.deviceMemoryGB || '?'}GB | SIMD ${e.wasmSIMD ? '○' : '×'}`);
   if (REPORT.model) L.push(`모델: ${REPORT.model.name}${REPORT.model.pass2 ? ' + 2차 ' + REPORT.model.pass2 : ''} | 내려받기 ${REPORT.model.downloadMs}ms(캐시 ${REPORT.model.cachedFiles}/${REPORT.model.totalFiles}) | 초기화 ${REPORT.model.initMs}ms${REPORT.model.init2Ms ? ' + ' + REPORT.model.init2Ms + 'ms' : ''} | ${REPORT.model.decoding} | 끝 무음 ${REPORT.model.endpointSec}s`);
-  for (const r of REPORT.runs) { L.push(`- ${r.source}: 음성 ${r.audioSec}s, 배속 ${r.rtf}×, 평균 처리 ${r.avgStepMs}ms/100ms, 최대 ${r.maxStepMs}ms, 최대 지연 ${r.maxLagMs}ms, 문장 ${r.segments}, 1차 오류율 ${r.cer != null ? (r.cer * 100).toFixed(1) + '%' : '–'}, 입력 피크 ${r.peak} / 평균 RMS ${r.avgRms} / 적용 이득 평균 ${r.gainAvg}× 최대 ${r.gainMax}×${r.mic ? ', ctx ' + r.mic.ctxState + ' ' + r.mic.ctxRate + 'Hz, 트랙 ' + JSON.stringify(r.mic.settings) : ''}${r.p1EmptySegs ? ', 1차 빈 구간 ' + r.p1EmptySegs : ''}`); L.push(`  · 1차 텍스트: ${r.text}`); if (r.pass2) { L.push(`  · 2차: 문장당 평균 ${r.pass2.avgMs}ms, 최대 ${r.pass2.maxMs}ms, 배속 ${r.pass2.rtf}×, 오류율 ${r.pass2.cer != null ? (r.pass2.cer * 100).toFixed(1) + '%' : '–'}`); L.push(`  · 2차 텍스트: ${r.pass2.text}`); } }
+  for (const r of REPORT.runs) { L.push(`- ${r.source}: 음성 ${r.audioSec}s, 배속 ${r.rtf}×, 평균 처리 ${r.avgStepMs}ms/100ms, 최대 ${r.maxStepMs}ms, 최대 지연 ${r.maxLagMs}ms, 문장 ${r.segments}, 1차 오류율 ${r.cer != null ? (r.cer * 100).toFixed(1) + '%' : '–'}, 입력 피크 ${r.peak} / 평균 RMS ${r.avgRms} / 적용 이득 평균 ${r.gainAvg}× 최대 ${r.gainMax}×${r.mic ? ', ctx ' + r.mic.ctxState + ' ' + r.mic.ctxRate + 'Hz, 트랙 ' + JSON.stringify(r.mic.settings) : ''}${r.p1EmptySegs ? ', 1차 빈 구간 ' + r.p1EmptySegs : ''}`); L.push(`  · 1차 텍스트: ${r.text}`); if (r.segStats) L.push(`  · 구간별(시각 피크 이득 | 1차 → 2차): ${r.segStats}`); if (r.pass2) { L.push(`  · 2차: 문장당 평균 ${r.pass2.avgMs}ms, 최대 ${r.pass2.maxMs}ms, 배속 ${r.pass2.rtf}×, 오류율 ${r.pass2.cer != null ? (r.pass2.cer * 100).toFixed(1) + '%' : '–'}`); L.push(`  · 2차 텍스트: ${r.pass2.text}`); } }
   if (REPORT.errors.length) { L.push('## 오류'); REPORT.errors.forEach(x => L.push('- ' + x)); }
   L.push('```json'); L.push(JSON.stringify(REPORT)); L.push('```');
   $('report').value = L.join('\n');
