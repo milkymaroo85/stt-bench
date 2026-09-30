@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="전사">
+<meta name="theme-color" content="#1f5fbf">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>실시간 전사</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#5f6b7a; --line:#dde2e8; --accent:#1f5fbf; --ok:#1e7d45; --warn:#b26a00; --bad:#b3261e; --code:#eef1f5; --rec:#d93025; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111417; --card:#1a1f25; --fg:#e6e9ee; --muted:#9aa5b1; --line:#2c343d; --accent:#6ea3ff; --ok:#5ccb84; --warn:#ffb74d; --bad:#ff7b72; --code:#232a32; --rec:#ff6b5e; } }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); }
+  header { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  nav { display:flex; gap:4px; }
+  nav button { padding:6px 10px; font-size:14px; border-radius:8px; }
+  nav button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { flex:1; overflow:auto; padding:14px; padding-bottom:calc(20px + env(safe-area-inset-bottom)); }
+  .screen { display:none; } .screen.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .muted { color:var(--muted); font-size:14px; } .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  button { font:inherit; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); } button.danger { color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  select, input[type=text], textarea { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  textarea { width:100%; min-height:140px; font-size:14px; }
+  .bar { height:6px; background:var(--code); border-radius:3px; overflow:hidden; } .bar > div { height:100%; background:var(--accent); width:0%; transition:width .15s; }
+  .recbtn { width:88px; height:88px; border-radius:50%; border:none; background:var(--rec); color:#fff; font-size:15px; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,.2); }
+  .recbtn.stop { background:var(--fg); color:var(--bg); border-radius:22px; }
+  .recwrap { display:flex; align-items:center; gap:18px; }
+  .timer { font-size:34px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .live { min-height:200px; background:var(--code); border-radius:10px; padding:12px; font-size:18px; line-height:1.75; white-space:pre-wrap; }
+  .live .seg { margin-bottom:4px; } .live .seg.pending { color:var(--muted); } .live .ts { color:var(--muted); font-size:12px; margin-right:6px; font-variant-numeric:tabular-nums; }
+  .live .partial { color:var(--accent); }
+  .seglist .seg { padding:8px 6px; border-bottom:1px solid var(--line); font-size:17px; line-height:1.7; } .seglist .seg:active { background:var(--code); } .seglist .seg.playing { background:var(--code); }
+  .seglist .ts { color:var(--accent); font-size:12px; margin-right:8px; font-variant-numeric:tabular-nums; }
+  .item { padding:12px 6px; border-bottom:1px solid var(--line); } .item:active { background:var(--code); }
+  .item .t { font-weight:600; } .item .s { color:var(--muted); font-size:13px; } .item .p { color:var(--muted); font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--fg); color:var(--bg); padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; }
+  .toast.on { opacity:.95; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  audio { width:100%; margin:6px 0; }
+  .lvl { display:flex; align-items:center; gap:8px; margin:6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>실시간 전사</h1>
+  <nav><button id="navRec" class="on">녹음</button><button id="navList">목록</button><button id="navSet">설정</button></nav>
+</header>
+<main>
+  <!-- 녹음 -->
+  <section id="scrRec" class="screen on">
+    <div class="card" id="modelCard">
+      <div class="row" style="justify-content:space-between"><span id="modelStatus" class="muted">모델을 준비해야 합니다 (처음 한 번, 약 240MB)</span><button class="primary" id="btnLoad">모델 준비</button></div>
+      <div class="bar" id="dlWrap" style="display:none"><div id="dlBar"></div></div>
+    </div>
+    <div class="card">
+      <div class="recwrap">
+        <button class="recbtn" id="btnRec" disabled>녹음</button>
+        <div><div class="timer" id="timer">0:00</div><div class="muted" id="recStatus">모델 준비 후 시작할 수 있습니다</div></div>
+      </div>
+      <div class="lvl"><span class="muted" style="font-size:12px">입력</span><div class="bar" style="flex:1"><div id="lvl" style="background:var(--ok)"></div></div><span id="micNote" class="muted" style="font-size:12px"></span></div>
+      <div class="row"><button id="btnPause" disabled>일시정지</button><span class="muted" style="font-size:13px">녹음 중에는 화면을 켜 두세요. 화면이 잠기면 마이크가 끊깁니다.</span></div>
+    </div>
+    <div class="live" id="live"><span class="muted">여기에 글자가 흐릅니다. 파란 글자는 잠정, 검은 글자는 확정입니다.</span></div>
+  </section>
+
+  <!-- 목록 -->
+  <section id="scrList" class="screen">
+    <div class="card"><div id="list"></div></div>
+  </section>
+
+  <!-- 세션 보기 -->
+  <section id="scrView" class="screen">
+    <div class="card">
+      <div class="row"><button id="btnBack">← 목록</button><input type="text" id="vTitle" style="flex:1; min-width:120px"><button id="btnDel" class="danger">삭제</button></div>
+      <div class="muted" id="vMeta"></div>
+      <audio id="vAudio" controls preload="metadata" style="display:none"></audio>
+      <div class="row">
+        <button class="primary" id="btnCopy">복사</button><button id="btnCopyTs">시각 포함 복사</button>
+        <button id="btnTxt">.txt</button><button id="btnMd">.md</button><button id="btnAud">녹음 파일</button>
+      </div>
+      <div class="row"><button id="btnRerun">용어 사전 다시 적용</button><span class="muted" style="font-size:13px">구간을 누르면 그 부분부터 재생됩니다.</span></div>
+    </div>
+    <div class="card seglist" id="vSegs"></div>
+  </section>
+
+  <!-- 설정 -->
+  <section id="scrSet" class="screen">
+    <div class="card">
+      <h3 style="margin:0 0 6px">용어 사전</h3>
+      <p class="muted">한 줄에 하나, <b>틀린 표기 =&gt; 바른 표기</b>. 인식 결과에 자동 적용됩니다(긴 것부터). 확정 텍스트에만 적용되며 원문은 함께 보관됩니다.</p>
+      <textarea id="glossary"></textarea>
+      <div class="row"><button class="primary" id="btnSaveGl">저장</button><button id="btnResetGl">기본값 복원</button><span id="glMsg" class="muted"></span></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">인식 설정</h3>
+      <div class="row"><label class="muted">문장 끊기(무음) <select id="setSil"><option value="0.6">0.6초</option><option value="0.8">0.8초</option><option value="1.2">1.2초</option></select></label>
+        <label class="muted">한 문장 최대 <select id="setMax"><option value="8">8초</option><option value="10">10초</option><option value="15">15초</option></select></label></div>
+      <div class="row"><label class="muted">잠정 글자 <select id="setPart"><option value="1">켬(1초마다)</option><option value="0">끔</option></select></label>
+        <label class="muted">마이크 <select id="setMic"><option value="default">브라우저 기본 처리(권장)</option><option value="raw">처리 끔(원음)</option></select></label></div>
+      <p class="muted" style="font-size:13px">설정은 다음 녹음부터 적용됩니다.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">저장 공간</h3>
+      <div class="muted" id="storageInfo">확인 중…</div>
+      <div class="row"><button id="btnClearModel" class="danger">모델 파일 삭제</button><span class="muted" style="font-size:13px">다음에 다시 내려받습니다.</span></div>
+    </div>
+    <div class="card muted" style="font-size:13px">
+      엔진: SenseVoice(int8) + Silero VAD, sherpa-onnx WebAssembly. 음성·텍스트는 이 기기 안에만 저장되며 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 버전 1.0.
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/speech-asr@1.1.6/dist/lib/sherpa-onnx-vad.js"></script>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const VERSION = '1.0.0';
+function toast(s, ms = 1800) { const t = $('toast'); t.textContent = s; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), ms); }
+function fmtT(sec) { const s = Math.floor(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function fmtTs(sec) { const s = Math.floor(sec); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
+function fmtMB(b) { return b >= 1e6 ? (b / 1e6).toFixed(b >= 1e7 ? 0 : 1) + 'MB' : Math.round(b / 1e3) + 'KB'; }
+function esc(s) { return (s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+// 리샘플러: 저역 통과(윈도 싱크 FIR) 후 선형 보간. 청크 경계 상태를 유지한다. 워클릿에서도 같은 코드를 쓴다.
+const RESAMPLER_SRC = `function makeResampler(srcRate, dstRate) {
+  if (srcRate === dstRate) return (x) => x;
+  const ratio = srcRate / dstRate; const half = Math.ceil(4 * ratio); const N = 2 * half + 1; const fc = 0.45 / ratio; const h = new Float32Array(N); let sum = 0;
+  for (let i = 0; i < N; i++) { const n = i - half; const sinc = n === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * n) / (Math.PI * n); const win = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (N - 1)); h[i] = sinc * win; sum += h[i]; }
+  for (let i = 0; i < N; i++) h[i] /= sum;
+  let tail = new Float32Array(N - 1); let phase = 0; // 필터 상태와 출력 위상
+  return (x) => {
+    const buf = new Float32Array(tail.length + x.length); buf.set(tail, 0); buf.set(x, tail.length);
+    const M = buf.length - (N - 1); if (M <= 0) { tail = buf; return new Float32Array(0); }
+    const y = new Float32Array(M); for (let i = 0; i < M; i++) { let acc = 0; for (let k = 0; k < N; k++) acc += buf[i + k] * h[k]; y[i] = acc; }
+    tail = buf.subarray(buf.length - (N - 1)).slice();
+    const outLen = Math.floor((M - 1 - phase) / ratio) + 1; const out = new Float32Array(Math.max(0, outLen)); let pos = phase;
+    for (let i = 0; i < outLen; i++) { const i0 = Math.floor(pos), f = pos - i0, i1 = Math.min(i0 + 1, M - 1); out[i] = y[i0] * (1 - f) + y[i1] * f; pos += ratio; }
+    phase = pos - M; if (phase < 0) phase = 0;
+    return out;
+  };
+}`;
+const makeResampler = new Function(RESAMPLER_SRC + '; return makeResampler;')();
+function concat(chunks) { const n = chunks.reduce((a, b) => a + b.length, 0); const out = new Float32Array(n); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; }
+function wavBlob(f32, rate) {
+  const buf = new ArrayBuffer(44 + f32.length * 2), v = new DataView(buf); const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + f32.length * 2, true); ws(8, 'WAVE'); ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); ws(36, 'data'); v.setUint32(40, f32.length * 2, true);
+  for (let i = 0; i < f32.length; i++) { const x = Math.max(-1, Math.min(1, f32[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// ---------- 화면 전환 ----------
+const screens = { rec: 'scrRec', list: 'scrList', view: 'scrView', set: 'scrSet' };
+function show(name) { for (const k in screens) $(screens[k]).classList.toggle('on', k === name); $('navRec').classList.toggle('on', name === 'rec'); $('navList').classList.toggle('on', name === 'list' || name === 'view'); $('navSet').classList.toggle('on', name === 'set'); if (name === 'list') renderList(); if (name === 'set') renderStorage(); }
+$('navRec').onclick = () => show('rec'); $('navList').onclick = () => show('list'); $('navSet').onclick = () => show('set'); $('btnBack').onclick = () => show('list');
+
+// ---------- 설정 ----------
+const DEFAULT_GLOSSARY = [
+  '외견서 => 의견서', '시장지적 지위 => 시장지배적 지위', '시장 지배적 지휘 => 시장지배적 지위', '시장지배적 지휘 => 시장지배적 지위', '관열 시장 => 관련 시장', '과징금산기준 => 과징금 산정 기준', '과징금 산정기점 => 과징금 산정 기준',
+  '심사보고에 대한 => 심사보고서에 대한', '공정 거래 위원회 => 공정거래위원회', '공정거래 위원회 => 공정거래위원회', '선해배상 => 손해배상', '손에 배상 => 손해배상', '내용증 우편 => 내용증명 우편', '계약 해지 통보 => 계약해지 통보',
+  '어떻게획 정할 => 어떻게 획정할', '어떻게획할 => 어떻게 획정할', '감정 사유 => 감경 사유', '감경기준 => 감경 기준', '시정 명령 => 시정명령', '동의 의결 => 동의의결', '부당 공동 행위 => 부당공동행위', '불공정 거래 행위 => 불공정거래행위', '기업 결합 => 기업결합', '하도급 법 => 하도급법', '가맹 사업법 => 가맹사업법',
+];
+const SET = { get sil() { return +(localStorage.getItem('sil') || 0.8); }, get max() { return +(localStorage.getItem('max') || 10); }, get part() { return +(localStorage.getItem('part') ?? 1); }, get mic() { return localStorage.getItem('mic') || 'default'; } };
+function loadGlossary() { const t = localStorage.getItem('glossary'); return t == null ? DEFAULT_GLOSSARY.join('\n') : t; }
+function glossaryRules() { return loadGlossary().split('\n').map(l => l.split('=>')).filter(p => p.length === 2 && p[0].trim()).map(p => [p[0].trim(), p[1].trim()]).sort((a, b) => b[0].length - a[0].length); }
+function applyGlossary(t) { let s = t; for (const [a, b] of glossaryRules()) s = s.split(a).join(b); return s; }
+function cleanText(t) { return (t || '').replace(/。/g, '.').replace(/，/g, ',').replace(/\s+([.,?!])/g, '$1').trim(); }
+$('glossary').value = loadGlossary(); $('setSil').value = SET.sil; $('setMax').value = SET.max; $('setPart').value = SET.part; $('setMic').value = SET.mic;
+$('btnSaveGl').onclick = () => { localStorage.setItem('glossary', $('glossary').value); $('glMsg').textContent = '저장됨'; setTimeout(() => $('glMsg').textContent = '', 1500); };
+$('btnResetGl').onclick = () => { $('glossary').value = DEFAULT_GLOSSARY.join('\n'); localStorage.setItem('glossary', $('glossary').value); $('glMsg').textContent = '기본값 복원'; };
+for (const [id, key] of [['setSil', 'sil'], ['setMax', 'max'], ['setPart', 'part'], ['setMic', 'mic']]) $(id).onchange = () => localStorage.setItem(key, $(id).value);
+
+// ---------- 저장소(IndexedDB) ----------
+const DB = await new Promise((res, rej) => { const q = indexedDB.open('stt-live-v1', 1); q.onupgradeneeded = () => { const d = q.result; d.createObjectStore('sessions', { keyPath: 'id' }); d.createObjectStore('audio', { keyPath: 'id' }); }; q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+const tx = (store, mode, fn) => new Promise((res, rej) => { const t = DB.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); });
+const dbPut = (store, v) => tx(store, 'readwrite', s => s.put(v));
+const dbGet = (store, id) => tx(store, 'readonly', s => s.get(id));
+const dbAll = (store) => tx(store, 'readonly', s => s.getAll());
+const dbDel = (store, id) => tx(store, 'readwrite', s => s.delete(id));
+async function renderStorage() { try { const est = await navigator.storage.estimate(); const n = (await dbAll('sessions')).length; $('storageInfo').textContent = `세션 ${n}개 · 사용 ${fmtMB(est.usage)} / 할당 ${(est.quota / 1e9).toFixed(1)}GB`; } catch (_) { $('storageInfo').textContent = '확인 불가'; } }
+$('btnClearModel').onclick = async () => { if (!confirm('모델 파일(약 240MB)을 지울까요? 다음 녹음 전에 다시 내려받습니다.')) return; try { await caches.delete(CACHE); toast('모델 파일 삭제됨'); renderStorage(); } catch (e) { toast('삭제 실패'); } };
+
+// ---------- 모델 ----------
+const CACHE = 'stt-stream-models-v1';
+const SV = [
+  { fs: 'sv-model.onnx', url: 'https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx', size: 237000000 },
+  { fs: 'sv-tokens.txt', url: 'https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt', size: 400000 },
+];
+const VADF = [{ fs: 'silero_vad.onnx', url: 'https://huggingface.co/csukuangfj/vad/resolve/main/silero_vad.onnx', size: 1807522 }];
+async function fetchFile(f, onProgress) {
+  let cache = null; try { cache = await caches.open(CACHE); const hit = await cache.match(f.url); if (hit) { const buf = await hit.arrayBuffer(); onProgress(buf.byteLength, buf.byteLength, true); return buf; } } catch (_) {}
+  const res = await fetch(f.url); if (!res.ok) throw new Error(`${f.fs} 내려받기 실패 HTTP ${res.status}`);
+  const total = +res.headers.get('content-length') || f.size; const reader = res.body.getReader(); const chunks = []; let got = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; onProgress(got, total, false); }
+  const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
+  try { if (cache) await cache.put(f.url, new Response(buf.buffer.slice(0), { headers: { 'content-type': 'application/octet-stream' } })); } catch (_) {}
+  return buf.buffer;
+}
+async function loadGlueBlobUrl() {
+  const src = await (await fetch('https://cdn.jsdelivr.net/npm/speech-asr@1.1.6/dist/lib/sherpa-onnx-wasm-main-asr.js')).text();
+  const i = src.indexOf('(function(){if(Module["ENVIRONMENT_IS_PTHREAD"]||Module["$ww"])return;var loadPackage=');
+  const k = src.indexOf('})();', i) + 5;
+  if (i < 0 || k < 5) throw new Error('런타임 글루 패치 실패');
+  return URL.createObjectURL(new Blob([src.slice(0, i) + src.slice(k)], { type: 'text/javascript' }));
+}
+let vad = null, w = null, ready = false; const pending = new Map(); let seq = 0;
+function decode(audio) { const id = ++seq; return new Promise((resolve) => { pending.set(id, { resolve, sent: performance.now() }); w.postMessage({ type: 'decode', id, audio }, [audio.buffer]); }); }
+async function loadModels() {
+  $('btnLoad').disabled = true; $('dlWrap').style.display = 'block'; const all = SV.concat(VADF); const totalBytes = all.reduce((a, f) => a + f.size, 0);
+  try {
+    const bufs = {}; let done = 0;
+    for (const f of all) { let last = 0; bufs[f.fs] = await fetchFile(f, (got, total, cached) => { done += got - last; last = got; $('dlBar').style.width = Math.min(100, done / totalBytes * 100) + '%'; $('modelStatus').textContent = cached ? '저장된 모델 불러오는 중…' : `내려받는 중 ${fmtMB(done)} / ${fmtMB(totalBytes)}`; }); }
+    $('modelStatus').textContent = '초기화 중…';
+    await new Promise((resolve, reject) => {
+      window.Module = { locateFile: (p) => p.endsWith('.wasm') ? 'https://cdn.jsdelivr.net/npm/speech-asr@1.1.6/dist/lib/sherpa-onnx-wasm-main-asr.wasm' : p, print: () => {}, printErr: (s) => console.warn('[vad]', s),
+        preRun: [function () { for (const f of VADF) Module.FS_createDataFile('/', f.fs, new Uint8Array(bufs[f.fs]), true, true, true); }], onRuntimeInitialized: () => resolve(), onAbort: (x) => reject(new Error('WASM abort: ' + x)) };
+      loadGlueBlobUrl().then((u) => { const s = document.createElement('script'); s.src = u; s.onerror = () => reject(new Error('런타임 로드 실패')); document.body.appendChild(s); }).catch(reject);
+    });
+    vad = createVad(window.Module, { sileroVad: { model: './silero_vad.onnx', threshold: 0.5, minSilenceDuration: SET.sil, minSpeechDuration: 0.25, maxSpeechDuration: SET.max, windowSize: 512 }, tenVad: { model: '', threshold: 0.5, minSilenceDuration: 0.5, minSpeechDuration: 0.25, maxSpeechDuration: 20, windowSize: 256 }, sampleRate: 16000, numThreads: 1, provider: 'cpu', debug: 0, bufferSizeInSeconds: 60 });
+    if (!vad.handle) throw new Error('VAD 생성 실패');
+    const mc = { senseVoice: { model: './sv-model.onnx', language: 'ko', useInverseTextNormalization: 1 }, tokens: './sv-tokens.txt', numThreads: 1, provider: 'cpu', debug: 0, modelType: '', modelingUnit: 'cjkchar', bpeVocab: '' };
+    const files2 = SV.map(f => ({ fs: f.fs, buf: bufs[f.fs] }));
+    await new Promise((resolve, reject) => {
+      w = new Worker('asr-worker.js');
+      w.onmessage = (ev) => { const m = ev.data; if (m.type === 'ready') { m.ok ? resolve() : reject(new Error('인식기 생성 실패 ' + (m.error || ''))); } else if (m.type === 'result') { const p = pending.get(m.id); if (p) { pending.delete(m.id); p.resolve({ text: m.text, ms: m.ms, wait: performance.now() - p.sent }); } } else if (m.type === 'log' && /!/.test(m.type)) console.warn(m.text); };
+      w.onerror = (ev) => reject(new Error('워커 오류: ' + ev.message));
+      w.postMessage({ type: 'init', files: files2, config: { modelConfig: mc, decodingMethod: 'greedy_search', maxActivePaths: 4, hotwordsFile: '', hotwordsScore: 1.5, ruleFsts: '', ruleFars: '', blankPenalty: 0 } }, files2.map(f => f.buf));
+    });
+    ready = true; $('modelStatus').innerHTML = '<span class="ok">모델 준비 완료</span>'; $('dlWrap').style.display = 'none'; $('btnLoad').style.display = 'none'; $('btnRec').disabled = false; $('recStatus').textContent = '녹음 버튼을 누르면 시작합니다';
+  } catch (err) { $('modelStatus').innerHTML = '<span class="bad">실패: ' + esc(err.message) + '</span>'; $('btnLoad').disabled = false; }
+}
+$('btnLoad').onclick = loadModels;
+// 모델이 이미 저장돼 있으면 자동 준비
+try { const c = await caches.open(CACHE); if (await c.match(SV[0].url)) loadModels(); } catch (_) {}
+
+// ---------- 녹음·인식 파이프라인 ----------
+let R = null, cap = null, paused = false;
+const PRE_ROLL = 16000 * 0.3;
+function cutHist(r, s, e) { const s0 = Math.max(0, s - 4000), s1 = e + 1600; const out = new Float32Array(s1 - s0); let ok = false; for (const h of r.hist) { const hs = h.off, he = h.off + h.data.length; if (he <= s0 || hs >= s1) continue; const a = Math.max(hs, s0), b = Math.min(he, s1); out.set(h.data.subarray(a - hs, b - hs), a - s0); ok = true; } return ok ? out : null; }
+function newRun() { vad.reset(); return { t0: performance.now(), audioSec: 0, keep: [], hist: [], recent: [], recentN: 0, utt: null, uttStart: 0, sincePartial: 0, partialBusy: false, partialText: '', segments: [], finalQueue: 0, env: 0, peak: 0, lastRms: 0 }; }
+function feed(r, a) {
+  let pk = 0, sq = 0; for (let i = 0; i < a.length; i++) { const v = a[i], x = v < 0 ? -v : v; if (x > pk) pk = x; sq += v * v; }
+  r.lastRms = Math.sqrt(sq / Math.max(1, a.length)); r.peak = Math.max(r.peak, pk);
+  r.keep.push(a.slice());
+  r.env = Math.max(pk, r.env * 0.985); const g = r.env > 0.0015 ? Math.min(30, 0.5 / r.env) : 1;
+  if (g > 1.05) { const out = new Float32Array(a.length); for (let i = 0; i < a.length; i++) { const v = a[i] * g; out[i] = v > 1 ? 1 : v < -1 ? -1 : v; } a = out; }
+  const chunkStart = Math.round(r.audioSec * 16000); r.audioSec += a.length / 16000;
+  r.hist.push({ off: chunkStart, data: a }); while (r.hist.length && r.hist[0].off < chunkStart - 16000 * 60) r.hist.shift();
+  r.recent.push(a); r.recentN += a.length; while (r.recentN - r.recent[0].length > PRE_ROLL) { r.recentN -= r.recent[0].length; r.recent.shift(); }
+  vad.acceptWaveform(a);
+  const det = vad.isDetected();
+  if (det && !r.utt) { r.utt = r.recent.slice(); r.uttStart = chunkStart; r.sincePartial = 0; }
+  else if (det && r.utt) { r.utt.push(a); r.sincePartial += a.length / 16000; }
+  if (r.utt && SET.part && r.sincePartial >= 1.0 && !r.partialBusy) {
+    r.sincePartial = 0; r.partialBusy = true; const all = concat(r.utt); const win = 16000 * 4; const audio = all.length > win ? all.slice(all.length - win) : all; const id = r.uttStart;
+    decode(audio).then(res => { r.partialBusy = false; if (R === r && r.utt && r.uttStart === id) { r.partialText = cleanText(res.text); render(r); } });
+  }
+  while (!vad.isEmpty()) {
+    const seg = vad.front(); vad.pop();
+    const s = { t: +(seg.start / 16000).toFixed(2), dur: +(seg.samples.length / 16000).toFixed(2), raw: null, text: null };
+    r.segments.push(s); r.utt = null; r.partialText = ''; r.finalQueue++;
+    const audio = cutHist(r, seg.start, seg.start + seg.samples.length) || seg.samples;
+    decode(audio).then(res => { r.finalQueue--; s.raw = cleanText(res.text); s.text = applyGlossary(s.raw); render(r); });
+  }
+}
+function render(r) {
+  const el = $('live');
+  el.innerHTML = r.segments.map(s => `<div class="seg${s.text == null ? ' pending' : ''}"><span class="ts">${fmtT(s.t)}</span>${s.text == null ? '…' : esc(s.text)}</div>`).join('') + (r.partialText ? `<div class="partial">${esc(r.partialText)}…</div>` : (r.utt ? '<div class="partial">…</div>' : ''));
+  el.scrollTop = el.scrollHeight; if (el.scrollHeight > el.clientHeight) { const m = document.querySelector('main'); m.scrollTop = m.scrollHeight; }
+  $('lvl').style.width = Math.min(100, Math.round(r.lastRms * 100 / 0.15)) + '%';
+}
+async function startRec() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const p0 = ctx.resume();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: SET.mic === 'default' ? { channelCount: 1 } : { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    await p0; if (ctx.state !== 'running') { try { await ctx.resume(); } catch (_) {} }
+    const src = ctx.createMediaStreamSource(stream);
+    R = newRun(); const r = R; let q = []; paused = false;
+    // 오디오 캡처: AudioWorklet(오디오 스레드, 끊김 없음) 우선, 안 되면 ScriptProcessor
+    let node = null, proc = null;
+    try {
+      if (ctx.audioWorklet) {
+        const code = RESAMPLER_SRC + `; class Cap extends AudioWorkletProcessor { constructor(){ super(); this.buf=[]; this.n=0; this.rs = makeResampler(sampleRate, 16000); } process(inputs){ const ch=inputs[0]&&inputs[0][0]; if(ch){ this.buf.push(new Float32Array(ch)); this.n+=ch.length; if(this.n>=2048){ const all=new Float32Array(this.n); let o=0; for(const b of this.buf){ all.set(b,o); o+=b.length; } this.buf=[]; this.n=0; const out=this.rs(all); if(out.length) this.port.postMessage(out,[out.buffer]); } } return true; } } registerProcessor('cap', Cap);`;
+        await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        node = new AudioWorkletNode(ctx, 'cap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+        node.port.onmessage = (e) => { if (R !== r || paused) return; q.push(e.data); };
+        src.connect(node); node.connect(ctx.destination); r.capKind = 'worklet';
+      }
+    } catch (err) { node = null; console.warn('AudioWorklet 실패, ScriptProcessor로 대체', err); }
+    if (!node) { proc = ctx.createScriptProcessor(4096, 1, 1); const rs = makeResampler(ctx.sampleRate, 16000); proc.onaudioprocess = (e) => { const inp = e.inputBuffer.getChannelData(0); e.outputBuffer.getChannelData(0).fill(0); if (R !== r || paused) return; const out = rs(new Float32Array(inp)); if (out.length) q.push(out); }; src.connect(proc); proc.connect(ctx.destination); r.capKind = 'scriptprocessor'; }
+    // 원본 녹음(가능하면 압축 포맷) — 재생·보관용
+    let mr = null, mrChunks = [], mrType = '';
+    try { const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']; mrType = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || ''; if (mrType) { mr = new MediaRecorder(stream, { mimeType: mrType, audioBitsPerSecond: 64000 }); mr.ondataavailable = (e) => { if (e.data && e.data.size) mrChunks.push(e.data); }; mr.start(1000); } } catch (_) { mr = null; }
+    try { if (navigator.wakeLock) r.wl = await navigator.wakeLock.request('screen'); } catch (_) {}
+    r.timer = setInterval(() => { if (R !== r) return; if (q.length) { const buf = concat(q); q = []; feed(r, buf); render(r); } if (!paused) r.elapsed = (r.elapsed || 0) + 0.1; $('timer').textContent = fmtT(r.audioSec); }, 100);
+    cap = { ctx, stream, src, proc, node, mr, mrChunks, mrType };
+    $('btnRec').textContent = '끝'; $('btnRec').classList.add('stop'); $('btnPause').disabled = false; $('recStatus').textContent = '녹음 중'; $('live').innerHTML = ''; $('micNote').textContent = r.capKind === 'worklet' ? '' : '(호환 모드)';
+    setTimeout(() => { if (R === r && r.peak < 0.005) $('micNote').innerHTML = '<span class="bad">소리가 잡히지 않습니다 — 마이크 권한 확인</span>'; }, 4000);
+    document.addEventListener('visibilitychange', onVis);
+  } catch (err) { $('recStatus').innerHTML = '<span class="bad">마이크 실패: ' + esc(err.message) + '</span>'; R = null; }
+}
+function onVis() { if (document.visibilityState === 'visible' && R && R.wl == null && navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { R.wl = w; }).catch(() => {}); }
+async function stopRec() {
+  const r = R; if (!r) return; R = null; clearInterval(r.timer); document.removeEventListener('visibilitychange', onVis);
+  $('recStatus').textContent = '마무리 중…'; $('btnRec').disabled = true; $('btnPause').disabled = true;
+  let audioBlob = null, audioType = '';
+  try {
+    if (cap.mr && cap.mr.state !== 'inactive') { await new Promise(res => { cap.mr.onstop = res; cap.mr.stop(); }); }
+    if (cap.proc) cap.proc.disconnect(); if (cap.node) { cap.node.port.onmessage = null; cap.node.disconnect(); } cap.src.disconnect(); cap.stream.getTracks().forEach(t => t.stop()); await cap.ctx.close();
+    if (cap.mrChunks.length) { audioBlob = new Blob(cap.mrChunks, { type: cap.mrType }); audioType = cap.mrType; }
+  } catch (_) {}
+  if (r.wl) try { r.wl.release(); } catch (_) {}
+  cap = null;
+  if (!audioBlob) { audioBlob = wavBlob(concat(r.keep), 16000); audioType = 'audio/wav'; }
+  r.keep = [];
+  vad.flush(); while (!vad.isEmpty()) { const seg = vad.front(); vad.pop(); const s = { t: +(seg.start / 16000).toFixed(2), dur: +(seg.samples.length / 16000).toFixed(2), raw: null, text: null }; r.segments.push(s); r.finalQueue++; const audio = cutHist(r, seg.start, seg.start + seg.samples.length) || seg.samples; decode(audio).then(res => { r.finalQueue--; s.raw = cleanText(res.text); s.text = applyGlossary(s.raw); render(r); }); }
+  r.utt = null; r.partialText = ''; render(r);
+  const w0 = performance.now(); while ((r.finalQueue > 0 || r.partialBusy) && performance.now() - w0 < 60000) await new Promise(res => setTimeout(res, 150));
+  const id = Date.now().toString(36); const now = new Date();
+  const sess = { id, title: `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} 녹음`, createdAt: now.toISOString(), durationSec: +r.audioSec.toFixed(1), segments: r.segments.map(s => ({ t: s.t, dur: s.dur, raw: s.raw || '', text: s.text || '' })), audioType, audioBytes: audioBlob.size, version: VERSION };
+  try { await dbPut('sessions', sess); await dbPut('audio', { id, blob: audioBlob }); toast('저장됨'); } catch (e) { toast('저장 실패: ' + e.message, 4000); }
+  $('btnRec').textContent = '녹음'; $('btnRec').classList.remove('stop'); $('btnRec').disabled = false; $('recStatus').textContent = '저장되었습니다'; $('timer').textContent = '0:00'; $('lvl').style.width = '0%';
+  openSession(id);
+}
+$('btnRec').onclick = () => { if (!ready) return; if (R) stopRec(); else startRec(); };
+$('btnPause').onclick = () => { if (!R) return; paused = !paused; $('btnPause').textContent = paused ? '이어서 녹음' : '일시정지'; $('recStatus').textContent = paused ? '일시정지' : '녹음 중'; if (cap && cap.mr) { try { paused ? cap.mr.pause() : cap.mr.resume(); } catch (_) {} } };
+window.addEventListener('beforeunload', (e) => { if (R) { e.preventDefault(); e.returnValue = ''; } });
+
+// ---------- 목록·세션 보기 ----------
+async function renderList() {
+  const all = (await dbAll('sessions')).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  $('list').innerHTML = all.length ? all.map(s => `<div class="item" data-id="${s.id}"><div class="t">${esc(s.title)}</div><div class="s">${new Date(s.createdAt).toLocaleString('ko-KR')} · ${fmtT(s.durationSec)} · ${s.segments.length}문장</div><div class="p">${esc(s.segments.map(x => x.text).join(' ').slice(0, 80))}</div></div>`).join('') : '<div class="muted">아직 녹음이 없습니다.</div>';
+  $('list').querySelectorAll('.item').forEach(el => el.onclick = () => openSession(el.dataset.id));
+}
+let CUR = null, curUrl = null;
+async function openSession(id) {
+  const s = await dbGet('sessions', id); if (!s) return; CUR = s; show('view');
+  $('vTitle').value = s.title; $('vMeta').textContent = `${new Date(s.createdAt).toLocaleString('ko-KR')} · ${fmtT(s.durationSec)} · ${s.segments.length}문장 · 녹음 ${fmtMB(s.audioBytes || 0)} ${s.audioType || ''}`;
+  const a = await dbGet('audio', id); const au = $('vAudio'); if (curUrl) URL.revokeObjectURL(curUrl);
+  if (a && a.blob) { curUrl = URL.createObjectURL(a.blob); au.src = curUrl; au.style.display = 'block'; } else { au.style.display = 'none'; }
+  renderSegs();
+}
+function renderSegs() {
+  const s = CUR; $('vSegs').innerHTML = s.segments.map((x, i) => `<div class="seg" data-i="${i}"><span class="ts">${fmtTs(x.t)}</span>${esc(x.text)}</div>`).join('') || '<div class="muted">인식된 문장이 없습니다.</div>';
+  $('vSegs').querySelectorAll('.seg').forEach(el => el.onclick = () => { const x = s.segments[+el.dataset.i]; const au = $('vAudio'); if (au.src) { au.currentTime = Math.max(0, x.t - 0.2); au.play().catch(() => {}); } $('vSegs').querySelectorAll('.seg').forEach(e => e.classList.toggle('playing', e === el)); });
+}
+$('vTitle').onchange = async () => { if (!CUR) return; CUR.title = $('vTitle').value.trim() || CUR.title; await dbPut('sessions', CUR); toast('제목 저장'); };
+$('btnDel').onclick = async () => { if (!CUR || !confirm('이 녹음과 텍스트를 삭제할까요?')) return; await dbDel('sessions', CUR.id); await dbDel('audio', CUR.id); CUR = null; toast('삭제됨'); show('list'); };
+$('btnRerun').onclick = async () => { if (!CUR) return; CUR.segments.forEach(x => { x.text = applyGlossary(x.raw || x.text); }); await dbPut('sessions', CUR); renderSegs(); toast('용어 사전 적용'); };
+function plainText(withTs) { return CUR.segments.map(x => (withTs ? `[${fmtTs(x.t)}] ` : '') + x.text).join('\n'); }
+async function copyText(t) { try { await navigator.clipboard.writeText(t); toast('복사됨'); } catch (_) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('복사됨'); } }
+$('btnCopy').onclick = () => copyText(plainText(false)); $('btnCopyTs').onclick = () => copyText(plainText(true));
+function downloadBlob(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
+async function saveFile(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  const canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/.test(navigator.userAgent));
+  if (!canShare) return downloadBlob(blob, name);
+  try { await navigator.share({ files: [file], title: name }); } catch (e) { if (e.name !== 'AbortError') downloadBlob(blob, name); }
+}
+const safeName = () => (CUR.title || 'transcript').replace(/[\\/:*?"<>|]/g, '_');
+$('btnTxt').onclick = () => saveFile(new Blob([plainText(true) + '\n'], { type: 'text/plain' }), safeName() + '.txt');
+$('btnMd').onclick = () => saveFile(new Blob([`# ${CUR.title}\n\n${new Date(CUR.createdAt).toLocaleString('ko-KR')} · ${fmtT(CUR.durationSec)}\n\n` + CUR.segments.map(x => `- **${fmtTs(x.t)}** ${x.text}`).join('\n') + '\n'], { type: 'text/markdown' }), safeName() + '.md');
+$('btnAud').onclick = async () => { const a = await dbGet('audio', CUR.id); if (!a) return toast('녹음 파일 없음'); const ext = (a.blob.type || '').includes('mp4') ? 'm4a' : (a.blob.type || '').includes('webm') ? 'webm' : 'wav'; saveFile(a.blob, safeName() + '.' + ext); };
+
+renderStorage();
+</script>
+</body>
+</html>
