@@ -83,6 +83,7 @@
     </div>
     <div class="card">
       <div class="spkrow"><button id="spkA">조사관</button><button id="spkB" class="b">회사</button></div>
+      <div class="row" style="margin:2px 0 6px"><button id="btnSpkNames" style="padding:6px 10px; font-size:13px">화자 이름 바꾸기</button><span id="spkNameForm" style="display:none; gap:6px; align-items:center; flex-wrap:wrap"><input id="inSpkA" type="text" style="width:96px" placeholder="버튼 1"> <input id="inSpkB" type="text" style="width:96px" placeholder="버튼 2"> <button id="btnSpkApply" class="primary" style="padding:6px 10px">적용</button></span></div>
       <div class="sendrow"><button class="primary" id="btnCopyNew" disabled>미전송 복사 (0)</button><button id="btnShareNew" disabled>공유</button><span class="muted" style="font-size:12px">아직 안 보낸 확정 문장을 "시각 [화자] 문장" 형식으로. 문장 앞 라벨을 누르면 화자가 바뀝니다.</span></div>
     </div>
     <div class="live" id="live"><span class="muted">여기에 글자가 흐릅니다. 파란 글자는 잠정, 검은 글자는 확정입니다.</span></div>
@@ -127,7 +128,7 @@
     <div class="card">
       <h3 style="margin:0 0 6px">화자 이름</h3>
       <div class="row"><label class="muted">버튼 1 <input type="text" id="setSpkA" style="width:110px"></label><label class="muted">버튼 2 <input type="text" id="setSpkB" style="width:110px"></label></div>
-      <p class="muted" style="font-size:13px">녹음 중 버튼을 누르면 그때부터 끝나는 문장에 그 화자가 붙습니다. 같은 버튼을 다시 누르면 해제됩니다.</p>
+      <p class="muted" style="font-size:13px">기본 이름입니다. 녹음 화면의 '화자 이름 바꾸기'로 그때그때 바꿀 수 있고, 바꾼 이름이 다음에도 유지됩니다. 녹음 중 버튼을 누르면 그때부터 끝나는 문장에 그 화자가 붙고, 같은 버튼을 다시 누르면 해제됩니다.</p>
     </div>
     <div class="card">
       <h3 style="margin:0 0 6px">저장 공간</h3>
@@ -135,7 +136,7 @@
       <div class="row"><button id="btnClearModel" class="danger">모델 파일 삭제</button><span class="muted" style="font-size:13px">다음에 다시 내려받습니다.</span></div>
     </div>
     <div class="card muted" style="font-size:13px">
-      엔진: SenseVoice(int8) + Silero VAD, sherpa-onnx WebAssembly. 음성·텍스트는 이 기기 안에만 저장되며 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 버전 1.1.0.
+      엔진: SenseVoice(int8) + Silero VAD, sherpa-onnx WebAssembly. 음성·텍스트는 이 기기 안에만 저장되며 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 버전 1.1.1.
     </div>
   </section>
 </main>
@@ -145,7 +146,7 @@
 <script src="https://cdn.jsdelivr.net/npm/speech-asr@1.1.6/dist/lib/sherpa-onnx-vad.js"></script>
 <script type="module">
 const $ = (id) => document.getElementById(id);
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 function toast(s, ms = 1800) { const t = $('toast'); t.textContent = s; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), ms); }
 function fmtT(sec) { const s = Math.floor(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function fmtTs(sec) { const s = Math.floor(sec); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
@@ -199,7 +200,7 @@ $('btnSaveGl').onclick = () => { localStorage.setItem('glossary', $('glossary').
 $('btnResetGl').onclick = () => { $('glossary').value = DEFAULT_GLOSSARY.join('\n'); localStorage.setItem('glossary', $('glossary').value); $('glMsg').textContent = '기본값 복원'; };
 for (const [id, key] of [['setSil', 'sil'], ['setMax', 'max'], ['setPart', 'part'], ['setMic', 'mic']]) $(id).onchange = () => localStorage.setItem(key, $(id).value);
 $('setSpkA').value = SET.spkA; $('setSpkB').value = SET.spkB;
-for (const [id, key] of [['setSpkA', 'spkA'], ['setSpkB', 'spkB']]) $(id).onchange = () => { const v = $(id).value.trim(); if (v) localStorage.setItem(key, v); else localStorage.removeItem(key); $(id).value = SET[key]; updateSpkButtons(); };
+$('setSpkA').onchange = () => applySpkNames($('setSpkA').value, SET.spkB); $('setSpkB').onchange = () => applySpkNames(SET.spkA, $('setSpkB').value);
 
 // ---------- 저장소(IndexedDB) ----------
 const DB = await new Promise((res, rej) => { const q = indexedDB.open('stt-live-v1', 1); q.onupgradeneeded = () => { const d = q.result; d.createObjectStore('sessions', { keyPath: 'id' }); d.createObjectStore('audio', { keyPath: 'id' }); }; q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
@@ -303,6 +304,18 @@ function setSpk(label) { curSpk = label; if (R) R.spkLog.push({ at: R.audioSec, 
 $('spkA').onclick = () => setSpk(curSpk === SET.spkA ? '' : SET.spkA);
 $('spkB').onclick = () => setSpk(curSpk === SET.spkB ? '' : SET.spkB);
 updateSpkButtons();
+// 이름 바꾸기: 진행 중인 녹음의 기존 라벨·화자 기록도 새 이름으로 바꾼다
+function applySpkNames(a, b) {
+  const na = (a || '').trim() || '조사관', nb = (b || '').trim() || '회사'; const oa = SET.spkA, ob = SET.spkB;
+  const map = {}; if (oa !== na) map[oa] = na; if (ob !== nb) map[ob] = nb;
+  if (R && Object.keys(map).length) { R.segments.forEach(s => { if (s.spk in map) s.spk = map[s.spk]; }); R.spkLog.forEach(e => { if (e.spk in map) e.spk = map[e.spk]; }); }
+  if (curSpk in map) curSpk = map[curSpk];
+  localStorage.setItem('spkA', na); localStorage.setItem('spkB', nb);
+  $('setSpkA').value = na; $('setSpkB').value = nb; $('inSpkA').value = na; $('inSpkB').value = nb;
+  updateSpkButtons(); if (R) render(R);
+}
+$('btnSpkNames').onclick = () => { const f = $('spkNameForm'); const open = f.style.display === 'none'; f.style.display = open ? 'inline-flex' : 'none'; if (open) { $('inSpkA').value = SET.spkA; $('inSpkB').value = SET.spkB; $('inSpkA').focus(); } };
+$('btnSpkApply').onclick = () => { applySpkNames($('inSpkA').value, $('inSpkB').value); $('spkNameForm').style.display = 'none'; toast('화자 이름 적용'); };
 function spkAt(r, t) { let v = ''; for (const e of r.spkLog) { if (e.at <= t) v = e.spk; else break; } return v; }
 function cycleSpk(s) { s.spk = !s.spk ? SET.spkA : s.spk === SET.spkA ? SET.spkB : ''; }
 // 문장이 끝난 시점의 화자를 붙인다(버튼은 보통 말이 시작된 뒤에 눌리므로 시작 시점보다 끝 시점이 맞을 확률이 높다). 틀리면 라벨을 눌러 고친다.
