@@ -53,10 +53,18 @@
   .lvl { display:flex; align-items:center; gap:8px; margin:6px 0; }
   .spkrow { display:flex; gap:8px; margin:10px 0 6px; }
   .spkrow button { flex:1; padding:14px 8px; font-size:17px; font-weight:600; border-radius:12px; }
-  .spkrow button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .spkrow button.on.b { background:var(--ok); border-color:var(--ok); }
+  .spkrow { flex-wrap:wrap; } .spkrow button { flex:1 1 calc(33% - 8px); min-width:90px; }
+  .spkrow button.add { flex:0 0 auto; min-width:52px; font-size:22px; padding:8px 12px; color:var(--muted); }
+  :root { --c0:#1f5fbf; --c1:#1e7d45; --c2:#b26a00; --c3:#8e24aa; --c4:#c62828; --c5:#00838f; --c6:#5d4037; --c7:#455a64; --c8:#ad1457; }
+  .spkrow button.on { color:#fff; }
+  .c0.on, .spk.c0 { background:var(--c0); border-color:var(--c0); } .c1.on, .spk.c1 { background:var(--c1); border-color:var(--c1); } .c2.on, .spk.c2 { background:var(--c2); border-color:var(--c2); }
+  .c3.on, .spk.c3 { background:var(--c3); border-color:var(--c3); } .c4.on, .spk.c4 { background:var(--c4); border-color:var(--c4); } .c5.on, .spk.c5 { background:var(--c5); border-color:var(--c5); }
+  .c6.on, .spk.c6 { background:var(--c6); border-color:var(--c6); } .c7.on, .spk.c7 { background:var(--c7); border-color:var(--c7); } .c8.on, .spk.c8 { background:var(--c8); border-color:var(--c8); }
   .spk { display:inline-block; min-width:40px; text-align:center; padding:1px 7px; margin-right:6px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid var(--line); color:var(--muted); vertical-align:middle; cursor:pointer; line-height:1.5; }
-  .spk.a { background:var(--accent); color:#fff; border-color:var(--accent); } .spk.b { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .spk.c0, .spk.c1, .spk.c2, .spk.c3, .spk.c4, .spk.c5, .spk.c6, .spk.c7, .spk.c8 { color:#fff; }
+  .sheet { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:20; align-items:flex-end; } .sheet.on { display:flex; }
+  .sheetin { background:var(--card); width:100%; border-radius:16px 16px 0 0; padding:14px 14px calc(16px + env(safe-area-inset-bottom)); }
+  .namerow { display:flex; gap:6px; align-items:center; margin:4px 0; } .namerow input { flex:1; min-width:0; } .namerow .idx { width:22px; color:var(--muted); font-size:13px; text-align:right; }
   .seg.sent .ts::before { content:'\2713 '; color:var(--ok); }
   .sendrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 2px; }
 </style>
@@ -82,8 +90,8 @@
       <div class="row"><button id="btnPause" disabled>일시정지</button><span class="muted" style="font-size:13px">녹음 중에는 화면을 켜 두세요. 화면이 잠기면 마이크가 끊깁니다.</span></div>
     </div>
     <div class="card">
-      <div class="spkrow"><button id="spkA">조사관</button><button id="spkB" class="b">회사</button></div>
-      <div class="row" style="margin:2px 0 6px"><button id="btnSpkNames" style="padding:6px 10px; font-size:13px">화자 이름 바꾸기</button><span id="spkNameForm" style="display:none; gap:6px; align-items:center; flex-wrap:wrap"><input id="inSpkA" type="text" style="width:96px" placeholder="버튼 1"> <input id="inSpkB" type="text" style="width:96px" placeholder="버튼 2"> <button id="btnSpkApply" class="primary" style="padding:6px 10px">적용</button></span></div>
+      <div class="spkrow" id="spkrow"></div>
+      <div class="row" style="margin:2px 0 6px"><button id="btnSpkNames" style="padding:6px 10px; font-size:13px">화자 이름·수 바꾸기</button><span class="muted" style="font-size:12px">최대 9명. 지금 말하는 사람의 버튼을 누르세요. 같은 버튼을 다시 누르면 해제.</span></div>
       <div class="sendrow"><button class="primary" id="btnCopyNew" disabled>미전송 복사 (0)</button><button id="btnShareNew" disabled>공유</button><span class="muted" style="font-size:12px">아직 안 보낸 확정 문장을 "시각 [화자] 문장" 형식으로. 문장 앞 라벨을 누르면 화자가 바뀝니다.</span></div>
     </div>
     <div class="live" id="live"><span class="muted">여기에 글자가 흐릅니다. 파란 글자는 잠정, 검은 글자는 확정입니다.</span></div>
@@ -126,27 +134,31 @@
       <p class="muted" style="font-size:13px">설정은 다음 녹음부터 적용됩니다.</p>
     </div>
     <div class="card">
-      <h3 style="margin:0 0 6px">화자 이름</h3>
-      <div class="row"><label class="muted">버튼 1 <input type="text" id="setSpkA" style="width:110px"></label><label class="muted">버튼 2 <input type="text" id="setSpkB" style="width:110px"></label></div>
-      <p class="muted" style="font-size:13px">기본 이름입니다. 녹음 화면의 '화자 이름 바꾸기'로 그때그때 바꿀 수 있고, 바꾼 이름이 다음에도 유지됩니다. 녹음 중 버튼을 누르면 그때부터 끝나는 문장에 그 화자가 붙고, 같은 버튼을 다시 누르면 해제됩니다.</p>
-    </div>
-    <div class="card">
       <h3 style="margin:0 0 6px">저장 공간</h3>
       <div class="muted" id="storageInfo">확인 중…</div>
       <div class="row"><button id="btnClearModel" class="danger">모델 파일 삭제</button><span class="muted" style="font-size:13px">다음에 다시 내려받습니다.</span></div>
     </div>
     <div class="card muted" style="font-size:13px">
-      엔진: SenseVoice(int8) + Silero VAD, sherpa-onnx WebAssembly. 음성·텍스트는 이 기기 안에만 저장되며 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 버전 1.1.1.
+      엔진: SenseVoice(int8) + Silero VAD, sherpa-onnx WebAssembly. 음성·텍스트는 이 기기 안에만 저장되며 인터넷은 모델 파일을 처음 내려받을 때만 씁니다. 버전 1.2.0.
     </div>
   </section>
 </main>
+<div class="sheet" id="spkEdit"><div class="sheetin">
+  <div class="row" style="justify-content:space-between; margin-top:0"><b>화자 이름·수</b><span class="muted" style="font-size:12px">2~9명. 빈 칸은 '화자 N'으로.</span></div>
+  <div id="spkEditRows"></div>
+  <div class="row"><button id="spkEditAdd">+ 화자 추가</button><span style="flex:1"></span><button id="spkEditCancel">취소</button><button class="primary" id="spkEditApply">적용</button></div>
+</div></div>
+<div class="sheet" id="spkPick"><div class="sheetin">
+  <div class="row" style="justify-content:space-between; margin-top:0"><b>이 문장의 화자</b><button id="spkPickClose" style="padding:6px 10px">닫기</button></div>
+  <div class="spkrow" id="spkPickBtns"></div>
+</div></div>
 <div class="toast" id="toast"></div>
 <button class="follow" id="btnFollow">↓ 맨 아래로</button>
 
 <script src="https://cdn.jsdelivr.net/npm/speech-asr@1.1.6/dist/lib/sherpa-onnx-vad.js"></script>
 <script type="module">
 const $ = (id) => document.getElementById(id);
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 function toast(s, ms = 1800) { const t = $('toast'); t.textContent = s; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), ms); }
 function fmtT(sec) { const s = Math.floor(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function fmtTs(sec) { const s = Math.floor(sec); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
@@ -190,7 +202,7 @@ const DEFAULT_GLOSSARY = [
   '심사보고에 대한 => 심사보고서에 대한', '공정 거래 위원회 => 공정거래위원회', '공정거래 위원회 => 공정거래위원회', '선해배상 => 손해배상', '손에 배상 => 손해배상', '내용증 우편 => 내용증명 우편', '계약 해지 통보 => 계약해지 통보',
   '어떻게획 정할 => 어떻게 획정할', '어떻게획할 => 어떻게 획정할', '감정 사유 => 감경 사유', '감경기준 => 감경 기준', '시정 명령 => 시정명령', '동의 의결 => 동의의결', '부당 공동 행위 => 부당공동행위', '불공정 거래 행위 => 불공정거래행위', '기업 결합 => 기업결합', '하도급 법 => 하도급법', '가맹 사업법 => 가맹사업법',
 ];
-const SET = { get sil() { return +(localStorage.getItem('sil') || 0.8); }, get max() { return +(localStorage.getItem('max') || 10); }, get part() { return +(localStorage.getItem('part') ?? 1); }, get mic() { return localStorage.getItem('mic') || 'default'; }, get spkA() { return localStorage.getItem('spkA') || '조사관'; }, get spkB() { return localStorage.getItem('spkB') || '회사'; } };
+const SET = { get sil() { return +(localStorage.getItem('sil') || 0.8); }, get max() { return +(localStorage.getItem('max') || 10); }, get part() { return +(localStorage.getItem('part') ?? 1); }, get mic() { return localStorage.getItem('mic') || 'default'; } };
 function loadGlossary() { const t = localStorage.getItem('glossary'); return t == null ? DEFAULT_GLOSSARY.join('\n') : t; }
 function glossaryRules() { return loadGlossary().split('\n').map(l => l.split('=>')).filter(p => p.length === 2 && p[0].trim()).map(p => [p[0].trim(), p[1].trim()]).sort((a, b) => b[0].length - a[0].length); }
 function applyGlossary(t) { let s = t; for (const [a, b] of glossaryRules()) s = s.split(a).join(b); return s; }
@@ -199,8 +211,6 @@ $('glossary').value = loadGlossary(); $('setSil').value = SET.sil; $('setMax').v
 $('btnSaveGl').onclick = () => { localStorage.setItem('glossary', $('glossary').value); $('glMsg').textContent = '저장됨'; setTimeout(() => $('glMsg').textContent = '', 1500); };
 $('btnResetGl').onclick = () => { $('glossary').value = DEFAULT_GLOSSARY.join('\n'); localStorage.setItem('glossary', $('glossary').value); $('glMsg').textContent = '기본값 복원'; };
 for (const [id, key] of [['setSil', 'sil'], ['setMax', 'max'], ['setPart', 'part'], ['setMic', 'mic']]) $(id).onchange = () => localStorage.setItem(key, $(id).value);
-$('setSpkA').value = SET.spkA; $('setSpkB').value = SET.spkB;
-$('setSpkA').onchange = () => applySpkNames($('setSpkA').value, SET.spkB); $('setSpkB').onchange = () => applySpkNames(SET.spkA, $('setSpkB').value);
 
 // ---------- 저장소(IndexedDB) ----------
 const DB = await new Promise((res, rej) => { const q = indexedDB.open('stt-live-v1', 1); q.onupgradeneeded = () => { const d = q.result; d.createObjectStore('sessions', { keyPath: 'id' }); d.createObjectStore('audio', { keyPath: 'id' }); }; q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
@@ -297,34 +307,65 @@ function feed(r, a) {
 }
 // ---------- 화자 라벨·전달 ----------
 let curSpk = '';
-function spkCls(spk) { return spk === SET.spkA ? ' a' : spk === SET.spkB ? ' b' : ''; }
-function spkPill(s, i) { return `<span class="spk${spkCls(s.spk)}" data-i="${i}">${s.spk ? esc(s.spk) : '–'}</span>`; }
-function updateSpkButtons() { $('spkA').textContent = SET.spkA; $('spkB').textContent = SET.spkB; $('spkA').classList.toggle('on', !!curSpk && curSpk === SET.spkA); $('spkB').classList.toggle('on', !!curSpk && curSpk === SET.spkB); }
-function setSpk(label) { curSpk = label; if (R) R.spkLog.push({ at: R.audioSec, spk: label }); updateSpkButtons(); if (R) render(R); }
-$('spkA').onclick = () => setSpk(curSpk === SET.spkA ? '' : SET.spkA);
-$('spkB').onclick = () => setSpk(curSpk === SET.spkB ? '' : SET.spkB);
-updateSpkButtons();
-// 이름 바꾸기: 진행 중인 녹음의 기존 라벨·화자 기록도 새 이름으로 바꾼다
-function applySpkNames(a, b) {
-  const na = (a || '').trim() || '조사관', nb = (b || '').trim() || '회사'; const oa = SET.spkA, ob = SET.spkB;
-  const map = {}; if (oa !== na) map[oa] = na; if (ob !== nb) map[ob] = nb;
-  if (R && Object.keys(map).length) { R.segments.forEach(s => { if (s.spk in map) s.spk = map[s.spk]; }); R.spkLog.forEach(e => { if (e.spk in map) e.spk = map[e.spk]; }); }
-  if (curSpk in map) curSpk = map[curSpk];
-  localStorage.setItem('spkA', na); localStorage.setItem('spkB', nb);
-  $('setSpkA').value = na; $('setSpkB').value = nb; $('inSpkA').value = na; $('inSpkB').value = nb;
-  updateSpkButtons(); if (R) render(R);
+const MAX_SPK = 9;
+function loadSpks() {
+  try { const a = JSON.parse(localStorage.getItem('spks') || 'null'); if (Array.isArray(a) && a.length >= 2) return a.slice(0, MAX_SPK).map(x => String(x)); } catch (_) {}
+  return ['화자 1', '화자 2'];
 }
-$('btnSpkNames').onclick = () => { const f = $('spkNameForm'); const open = f.style.display === 'none'; f.style.display = open ? 'inline-flex' : 'none'; if (open) { $('inSpkA').value = SET.spkA; $('inSpkB').value = SET.spkB; $('inSpkA').focus(); } };
-$('btnSpkApply').onclick = () => { applySpkNames($('inSpkA').value, $('inSpkB').value); $('spkNameForm').style.display = 'none'; toast('화자 이름 적용'); };
+let SPKS = loadSpks();
+function saveSpks() { localStorage.setItem('spks', JSON.stringify(SPKS)); }
+function spkIdx(spk) { return spk ? SPKS.indexOf(spk) : -1; }
+function spkCls(spk) { const i = spkIdx(spk); return i >= 0 ? ' c' + i : ''; }
+function spkPill(s, i) { return `<span class="spk${spkCls(s.spk)}" data-i="${i}">${s.spk ? esc(s.spk) : '–'}</span>`; }
+function updateSpkButtons() {
+  $('spkrow').innerHTML = SPKS.map((n, i) => `<button class="c${i}${curSpk === n ? ' on' : ''}" data-i="${i}">${esc(n)}</button>`).join('') + (SPKS.length < MAX_SPK ? '<button class="add" id="spkQuickAdd" title="화자 추가">+</button>' : '');
+}
+$('spkrow').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'spkQuickAdd') { if (SPKS.length >= MAX_SPK) return; const n = nextSpkName(); SPKS.push(n); saveSpks(); setSpk(n); toast(n + ' 추가'); return; }
+  const n = SPKS[+b.dataset.i]; if (n == null) return; setSpk(curSpk === n ? '' : n);
+});
+function nextSpkName() { let k = SPKS.length + 1; while (SPKS.includes('화자 ' + k)) k++; return '화자 ' + k; }
+function setSpk(label) { curSpk = label; if (R) R.spkLog.push({ at: R.audioSec, spk: label }); updateSpkButtons(); if (R) render(R); }
+updateSpkButtons();
+// 이름·수 편집 시트: 적용 시 진행 중인 녹음의 기존 라벨·화자 기록도 새 이름으로 바꾼다(순서 기준)
+function renderSpkEditRows(list) {
+  $('spkEditRows').innerHTML = list.map((n, i) => `<div class="namerow"><span class="idx">${i + 1}</span><input type="text" value="${esc(n).replace(/"/g, '&quot;')}" data-i="${i}" placeholder="화자 ${i + 1}"><button data-del="${i}" style="padding:6px 10px"${list.length <= 2 ? ' disabled' : ''}>삭제</button></div>`).join('');
+  $('spkEditAdd').disabled = list.length >= MAX_SPK;
+}
+let editList = [];
+$('btnSpkNames').onclick = () => { editList = SPKS.slice(); renderSpkEditRows(editList); $('spkEdit').classList.add('on'); };
+$('spkEditRows').addEventListener('input', (e) => { const inp = e.target.closest('input'); if (inp) editList[+inp.dataset.i] = inp.value; });
+$('spkEditRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-del]'); if (!b || editList.length <= 2) return; editList.splice(+b.dataset.del, 1); renderSpkEditRows(editList); });
+$('spkEditAdd').onclick = () => { if (editList.length >= MAX_SPK) return; let k = editList.length + 1; while (editList.includes('화자 ' + k)) k++; editList.push('화자 ' + k); renderSpkEditRows(editList); };
+$('spkEditCancel').onclick = () => $('spkEdit').classList.remove('on');
+$('spkEditApply').onclick = () => { applySpkNames(editList); $('spkEdit').classList.remove('on'); toast('화자 설정 적용'); };
+function applySpkNames(list) {
+  const seen = new Set(); const next = list.slice(0, MAX_SPK).map((n, i) => { let v = (n || '').trim() || ('화자 ' + (i + 1)); while (seen.has(v)) v += '′'; seen.add(v); return v; });
+  while (next.length < 2) next.push('화자 ' + (next.length + 1));
+  const map = {}; SPKS.forEach((o, i) => { if (i < next.length && o !== next[i]) map[o] = next[i]; });
+  if (Object.keys(map).length) { if (R) { R.segments.forEach(s => { if (s.spk in map) s.spk = map[s.spk]; }); R.spkLog.forEach(e => { if (e.spk in map) e.spk = map[e.spk]; }); } if (curSpk in map) curSpk = map[curSpk]; }
+  if (curSpk && !next.includes(curSpk)) curSpk = '';
+  SPKS = next; saveSpks(); updateSpkButtons(); if (R) render(R);
+}
+// 문장 라벨을 누르면 화자 선택 시트
+let pickTarget = null, pickDone = null;
+function openSpkPick(seg, done) {
+  pickTarget = seg; pickDone = done;
+  $('spkPickBtns').innerHTML = `<button data-n=""${!seg.spk ? ' class="on" style="background:var(--fg);color:var(--bg)"' : ''}>없음</button>` + SPKS.map((n, i) => `<button class="c${i}${seg.spk === n ? ' on' : ''}" data-n="${esc(n).replace(/"/g, '&quot;')}">${esc(n)}</button>`).join('');
+  $('spkPick').classList.add('on');
+}
+$('spkPickBtns').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || !pickTarget) return; pickTarget.spk = b.dataset.n || ''; $('spkPick').classList.remove('on'); const d = pickDone; pickTarget = null; pickDone = null; if (d) d(); });
+$('spkPickClose').onclick = () => { $('spkPick').classList.remove('on'); pickTarget = null; pickDone = null; };
+$('spkPick').onclick = (e) => { if (e.target === $('spkPick')) $('spkPickClose').onclick(); };
 function spkAt(r, t) { let v = ''; for (const e of r.spkLog) { if (e.at <= t) v = e.spk; else break; } return v; }
-function cycleSpk(s) { s.spk = !s.spk ? SET.spkA : s.spk === SET.spkA ? SET.spkB : ''; }
 // 문장이 끝난 시점의 화자를 붙인다(버튼은 보통 말이 시작된 뒤에 눌리므로 시작 시점보다 끝 시점이 맞을 확률이 높다). 틀리면 라벨을 눌러 고친다.
 function mkSeg(r, seg) { const t = seg.start / 16000, dur = seg.samples.length / 16000; return { t: +t.toFixed(2), dur: +dur.toFixed(2), raw: null, text: null, spk: spkAt(r, t + dur), at: new Date(Date.now() - Math.max(0, r.audioSec - t) * 1000).toISOString(), sent: false }; }
 function fmtClock(iso) { const d = new Date(iso); return isNaN(d) ? '--:--' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 function segClock(sess, s) { if (s.at) return s.at; const end = new Date(sess.createdAt).getTime(); return new Date(end - Math.max(0, (sess.durationSec || 0) - s.t) * 1000).toISOString(); }
 function sendLine(sess, s) { return `${fmtClock(segClock(sess, s))} ${s.spk ? '[' + s.spk + '] ' : ''}${s.text || ''}`; }
 function unsent(r) { return r.segments.filter(s => s.text != null && !s.sent); }
-$('live').addEventListener('click', (e) => { const p = e.target.closest('.spk'); if (!p || !R) return; const s = R.segments[+p.dataset.i]; if (!s) return; cycleSpk(s); render(R); });
+$('live').addEventListener('click', (e) => { const p = e.target.closest('.spk'); if (!p || !R) return; const r = R, s = r.segments[+p.dataset.i]; if (!s) return; openSpkPick(s, () => { if (R === r) render(r); }); });
 async function sendNew(viaShare) {
   const r = R; if (!r) return; const list = unsent(r); if (!list.length) return toast('보낼 새 문장이 없습니다');
   const text = list.map(s => sendLine({ createdAt: new Date(r.startedAt).toISOString(), durationSec: r.audioSec }, s)).join('\n');
@@ -426,7 +467,7 @@ async function openSession(id) {
 }
 function renderSegs() {
   const s = CUR; $('vSegs').innerHTML = s.segments.map((x, i) => `<div class="seg" data-i="${i}"><span class="ts">${fmtTs(x.t)}</span>${spkPill(x, i)}${esc(x.text)}</div>`).join('') || '<div class="muted">인식된 문장이 없습니다.</div>';
-  $('vSegs').querySelectorAll('.seg').forEach(el => el.onclick = async (ev) => { const x = s.segments[+el.dataset.i]; if (ev.target.closest('.spk')) { cycleSpk(x); await dbPut('sessions', s); renderSegs(); return; } const au = $('vAudio'); if (au.src) { au.currentTime = Math.max(0, x.t - 0.2); au.play().catch(() => {}); } $('vSegs').querySelectorAll('.seg').forEach(e => e.classList.toggle('playing', e === el)); });
+  $('vSegs').querySelectorAll('.seg').forEach(el => el.onclick = async (ev) => { const x = s.segments[+el.dataset.i]; if (ev.target.closest('.spk')) { openSpkPick(x, async () => { await dbPut('sessions', s); renderSegs(); }); return; } const au = $('vAudio'); if (au.src) { au.currentTime = Math.max(0, x.t - 0.2); au.play().catch(() => {}); } $('vSegs').querySelectorAll('.seg').forEach(e => e.classList.toggle('playing', e === el)); });
 }
 $('vTitle').onchange = async () => { if (!CUR) return; CUR.title = $('vTitle').value.trim() || CUR.title; await dbPut('sessions', CUR); toast('제목 저장'); };
 $('btnDel').onclick = async () => { if (!CUR || !confirm('이 녹음과 텍스트를 삭제할까요?')) return; await dbDel('sessions', CUR.id); await dbDel('audio', CUR.id); CUR = null; toast('삭제됨'); show('list'); };
